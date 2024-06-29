@@ -12,7 +12,7 @@ from threading import Thread
 
 
 @contextmanager
-def widget_state_context(self: "AIChatInterface",
+def widget_state_manager(self: "AIChatInterface",
                          enable_sending: bool,
                          enable_typing: bool):
     try:
@@ -103,8 +103,6 @@ class AIChatInterface:
                     return "break"
                 self.send_message(event)
             return "break"
-        else:
-            return
 
     def refresh_models(self):
         self.model_select.set("waiting...")
@@ -150,7 +148,7 @@ class AIChatInterface:
                                                           self.generate_ai_response())).start()
 
     def add_message_to_chat(self, sender, message: Union[str, Generator]):
-        with widget_state_context(self, enable_typing=True, enable_sending=False):
+        with widget_state_manager(self, enable_typing=True, enable_sending=False):
             self.chat.insert(tk.END, f"{sender}: \n", ("bold", f"{sender.lower()}_name"))
             if isinstance(message, str):
                 self.chat.insert(tk.END, f"{message}")
@@ -159,7 +157,7 @@ class AIChatInterface:
                 for i in message:
                     self.chat.insert(tk.END, f"{i}")
                     ai_message += i
-                    self.chat_history.append({"role": "assistant", "content": ai_message})
+                self.chat_history.append({"role": "assistant", "content": ai_message})
 
             self.chat.insert(tk.END, "\n\n")
             self.chat.see(tk.END)
@@ -181,12 +179,11 @@ class AIChatInterface:
                 if line.strip():
                     data = json.loads(line)
                     if 'message' in data:
-                        new_content = data['message']['content']
                         time.sleep(0.01)  # add a small delay to improve readability
-                        yield new_content
+                        yield data['message']['content']
 
     def clear_chat(self):
-        with widget_state_context(self, enable_typing=True, enable_sending=False):
+        with widget_state_manager(self, enable_typing=True, enable_sending=False):
             self.chat.delete(1.0, tk.END)
         self.chat_history.clear()
 
