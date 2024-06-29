@@ -18,4 +18,4 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-ten-drops = "ollama_gui:run"
+ollama-gui = "ollama_gui:run"
