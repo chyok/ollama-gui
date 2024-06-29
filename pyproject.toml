@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "ollama-gui"
+version = "1.0.0"
+description = "A very simple ollama GUI, implemented using the built-in Python Tkinter library, with no additional dependencies."
+authors = ["chyok <chyok@hotmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.6"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
