@@ -175,12 +175,20 @@ class AIChatInterface:
         )
 
         with urllib.request.urlopen(request) as resp:
-            for line in resp.read().decode('utf-8').splitlines():
-                if line.strip():
-                    data = json.loads(line)
-                    if 'message' in data:
-                        time.sleep(0.01)  # add a small delay to improve readability
-                        yield data['message']['content']
+            buffer = b''
+            while True:
+                data = resp.read(1024)
+                if not data:
+                    break
+                buffer += data
+                while b'\n' in buffer:
+                    line, buffer = buffer.split(b'\n', 1)
+                    line = line.decode('utf-8')
+                    if line.strip():
+                        data = json.loads(line)
+                        if 'message' in data:
+                            time.sleep(0.01)  # add a small delay to improve readability
+                            yield data['message']['content']
 
     def clear_chat(self):
         with widget_state_manager(self, enable_typing=True, enable_sending=False):
