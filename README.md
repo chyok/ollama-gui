@@ -5,18 +5,24 @@
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ollama-gui)
 
 A very simple ollama GUI, implemented using the built-in Python Tkinter library, with no additional dependencies.
+Provide you with the simplest possible visual Ollama interface.
 
 ![ollama-gui](https://github.com/chyok/ollama-gui/assets/32629225/672ba3c1-f7eb-4ee2-bcff-e06a0a3f349f)
 
 + one file project.
 + no external dependencies.
 
+## Before Start
+We need to set up llama service first.
+
+Please refer to: [Ollama](https://ollama.com/)
+
+
 ## Run
 
 Choose any way you like:
 
 ### source code
-Copy the **"ollama_gui.py"** file, then  
 `python ollama_gui.py`
 
 ### using pip
