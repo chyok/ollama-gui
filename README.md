@@ -4,6 +4,8 @@
 
 A very simple ollama GUI, implemented using the built-in Python Tkinter library, with no additional dependencies.
 
+![ollama-gui](https://github.com/chyok/ollama-gui/assets/32629225/672ba3c1-f7eb-4ee2-bcff-e06a0a3f349f)
+
 + one file project.
 + no external dependencies.
 
