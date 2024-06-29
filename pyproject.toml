@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/chyok/ollama-gui"
 repository = "https://github.com/chyok/ollama-gui"
-packages = [{ include = "ollama_gui" }]
+packages = [{ include = "ollama_gui.py" }]
 
 [tool.poetry.dependencies]
 python = "^3.6"
