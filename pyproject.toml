@@ -5,6 +5,9 @@ description = "A very simple ollama GUI, implemented using the built-in Python T
 authors = ["chyok <chyok@hotmail.com>"]
 license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/chyok/ollama-gui"
+repository = "https://github.com/chyok/ollama-gui"
+packages = [{ include = "ollama_gui" }]
 
 [tool.poetry.dependencies]
 python = "^3.6"
@@ -13,3 +16,6 @@ python = "^3.6"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+ten-drops = "ollama_gui:run"
