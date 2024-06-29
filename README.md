@@ -36,7 +36,7 @@ ollama-gui
 
 | Platform | Download Link                                                                                          | 
 |----------|--------------------------------------------------------------------------------------------------------|
-| Windows  | [Download](https://github.com/chyok/ollama-gui/releases/download/v1.0.0/ollama_gui-v1.0.0-windows.exe) |
+| Windows  | [Download](https://github.com/chyok/ollama-gui/releases/tag/latest) |
 
 ## License
 
