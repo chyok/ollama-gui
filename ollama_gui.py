@@ -32,7 +32,7 @@ class AIChatInterface:
     def __init__(self, root):
         self.root = root
         self.default_font = font.nametofont('TkTextFont').actual()["family"]
-        root.title("AI Chat Interface")
+        root.title("Ollama GUI")
         root.geometry("800x600")
 
         self.api_url = 'http://localhost:11434'
