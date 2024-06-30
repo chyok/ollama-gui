@@ -5,10 +5,11 @@ import urllib.parse
 import urllib.request
 import tkinter as tk
 
+from enum import Enum
 from tkinter import ttk, font
-from contextlib import contextmanager
-from typing import Union, Generator
 from threading import Thread
+from typing import Union, Generator
+from contextlib import contextmanager
 
 
 @contextmanager
@@ -26,6 +27,11 @@ def widget_state_manager(self: "AIChatInterface",
     finally:
         self.chat.config(state=tk.DISABLED)
         self.send_button.state(['!disabled'])
+
+
+class Sender(Enum):
+    User = "User"
+    AI = "AI"
 
 
 class AIChatInterface:
@@ -89,7 +95,7 @@ class AIChatInterface:
         self.user_input.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         self.user_input.bind("<Key>", self.handle_key_press)
 
-        self.send_button = ttk.Button(input_frame, text="  Send \n<Enter>", command=lambda: self.send_message(None))
+        self.send_button = ttk.Button(input_frame, text="  Send \n<Enter>", command=self.send_message)
         self.send_button.grid(row=0, column=1)
         self.send_button.state(['disabled'])
         self.refresh_models()
@@ -109,7 +115,7 @@ class AIChatInterface:
         self.send_button.state(['disabled'])
         self.refresh_button.state(['disabled'])
         self.api_url = self.host_input.get()
-        Thread(target=self.fetch_models).start()
+        Thread(target=self.fetch_models, daemon=True).start()
 
     def fetch_models(self):
         try:
@@ -137,21 +143,23 @@ class AIChatInterface:
         self.send_button.state(['disabled'])
         self.error_label.config(text="error")
 
-    def send_message(self, event=None):
+    def send_message(self, _=None):
         message = self.user_input.get("1.0", "end-1c").strip()
         if message:
-            self.add_message_to_chat("User", message)
-            self.chat_history.append({"role": "user", "content": message})
+            self.add_message_to_chat(Sender.User, message)
             self.user_input.delete("1.0", "end")
 
-            Thread(target=self.add_message_to_chat, args=(f"AI ({self.model_select.get()})",
-                                                          self.generate_ai_response())).start()
+            Thread(target=self.add_message_to_chat,
+                   args=(Sender.AI, self.generate_ai_response()),
+                   daemon=True).start()
 
-    def add_message_to_chat(self, sender, message: Union[str, Generator]):
+    def add_message_to_chat(self, sender: Enum, message: Union[str, Generator]):
         with widget_state_manager(self, enable_typing=True, enable_sending=False):
-            self.chat.insert(tk.END, f"{sender}: \n", ("bold", f"{sender.lower()}_name"))
+            _sender_name = sender.name if sender == Sender.User else f"AI ({self.model_select.get()})"
+            self.chat.insert(tk.END, f"{_sender_name}: \n", ("bold", sender.name))
             if isinstance(message, str):
                 self.chat.insert(tk.END, f"{message}")
+                self.chat_history.append({"role": "user", "content": message})
             else:
                 ai_message = ""
                 for i in message:
@@ -201,7 +209,8 @@ def run():
     app = AIChatInterface(root)
 
     app.chat.tag_configure("bold", font=(app.default_font, 12, "bold"))
-    app.chat.tag_configure("user_name", foreground="#007bff")
+    app.chat.tag_configure(Sender.User.name, foreground="#007bff")
+    app.chat.tag_configure(Sender.AI.name, foreground="#ff007b")
     app.chat.tag_configure("error", foreground="red")
 
     root.mainloop()
