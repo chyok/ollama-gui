@@ -35,11 +35,12 @@ class Sender(Enum):
 
 
 class AIChatInterface:
-    def __init__(self, root):
+    def __init__(self, root, background):
         self.root = root
         self.default_font = font.nametofont('TkTextFont').actual()["family"]
         root.title("Ollama GUI")
         root.geometry("800x600")
+        root.configure(bg=background)
 
         self.api_url = 'http://localhost:11434'
         self.chat_history = []
@@ -49,31 +50,31 @@ class AIChatInterface:
         root.grid_rowconfigure(2, weight=0)
 
         # header
-        header_frame = ttk.Frame(root)
+        header_frame = ttk.Frame(root, style="TFrame")
         header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=20)
         header_frame.grid_columnconfigure(2, weight=1)
 
         self.model_select = ttk.Combobox(header_frame, state="readonly", width=30)
         self.model_select.grid(row=0, column=0)
 
-        self.refresh_button = ttk.Button(header_frame, text="Refresh", command=self.refresh_models)
+        self.refresh_button = ttk.Button(header_frame, text="Refresh", command=self.refresh_models, style="TButton")
         self.refresh_button.grid(row=0, column=1, padx=(10, 0))
 
-        self.error_label = ttk.Label(header_frame, text="", foreground="red")
+        self.error_label = ttk.Label(header_frame, text="", foreground="red", background=background)
         self.error_label.grid(row=0, column=2, padx=(10, 0), sticky="w")
 
-        host_label = ttk.Label(header_frame, text="Host:")
+        host_label = ttk.Label(header_frame, text="Host:", background=background)
         host_label.grid(row=0, column=3, padx=(10, 0))
 
         self.host_input = ttk.Entry(header_frame, width=30)
         self.host_input.grid(row=0, column=4, padx=(5, 10))
         self.host_input.insert(0, self.api_url)
 
-        clear_button = ttk.Button(header_frame, text="Clear Chat", command=self.clear_chat)
+        clear_button = ttk.Button(header_frame, text="Clear Chat", command=self.clear_chat, style="TButton")
         clear_button.grid(row=0, column=5)
 
         # chat container
-        chat_frame = ttk.Frame(root)
+        chat_frame = ttk.Frame(root, style="TFrame")
         chat_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
         chat_frame.grid_columnconfigure(0, weight=1)
         chat_frame.grid_rowconfigure(0, weight=1)
@@ -95,9 +96,10 @@ class AIChatInterface:
         self.user_input.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         self.user_input.bind("<Key>", self.handle_key_press)
 
-        self.send_button = ttk.Button(input_frame, text="  Send \n<Enter>", command=self.send_message)
+        self.send_button = ttk.Button(input_frame, text="  Send \n<Enter>", command=self.send_message, style="TButton")
         self.send_button.grid(row=0, column=1)
         self.send_button.state(['disabled'])
+
         self.refresh_models()
 
     def handle_key_press(self, event):
@@ -206,7 +208,13 @@ class AIChatInterface:
 
 def run():
     root = tk.Tk()
-    app = AIChatInterface(root)
+    main_color = "#e1e0db"
+    app = AIChatInterface(root, background=main_color)
+    style = ttk.Style()
+    style.configure("TFrame", background=main_color)
+    style.configure("TButton", background=main_color)
+    style.configure("TLabel", background=main_color)
+    style.configure("TCombobox", background=main_color)
 
     app.chat.tag_configure("bold", font=(app.default_font, 12, "bold"))
     app.chat.tag_configure(Sender.User.name, foreground="#007bff")
