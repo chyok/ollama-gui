@@ -7,21 +7,6 @@ import tkinter as tk
 
 from tkinter import ttk, font
 from threading import Thread
-from typing import Union, Generator
-from contextlib import contextmanager
-
-
-@contextmanager
-def widget_state_manager(self: "AIChatInterface"):
-    try:
-        self.chat_box.config(state=tk.NORMAL)
-        self.send_button.state(["disabled"])
-        yield
-    except Exception:  # noqa
-        self.append_text_to_chat(tk.END, f"\nAI error!\n\n", ("Error",))
-    finally:
-        self.chat_box.config(state=tk.DISABLED)
-        self.send_button.state(["!disabled"])
 
 
 class AIChatInterface:
@@ -50,10 +35,10 @@ class AIChatInterface:
         self.host_input.grid(row=0, column=4, padx=(5, 10))
         self.host_input.insert(0, self.api_url)
 
-        clear_button = ttk.Button(
+        self.clear_button = ttk.Button(
             header_frame, text="Clear Chat", command=self.clear_chat
         )
-        clear_button.grid(row=0, column=5)
+        self.clear_button.grid(row=0, column=5)
 
         # chat container
         chat_frame = ttk.Frame(root)
@@ -95,8 +80,10 @@ class AIChatInterface:
         self.refresh_models()
 
     def append_text_to_chat(self, text, *args):
+        self.chat_box.config(state=tk.NORMAL)
         self.chat_box.insert(tk.END, text, *args)
         self.chat_box.see(tk.END)
+        self.chat_box.config(state=tk.DISABLED)
 
     def handle_key_press(self, event):
         if event.keysym == "Return":
@@ -142,33 +129,39 @@ class AIChatInterface:
     def on_send_button(self, _=None):
         message = self.user_input.get("1.0", "end-1c").strip()
         if message:
-            self.add_message_to_chat(message)
+            self.append_text_to_chat(f"User: \n", ("Bold", "User"))
+            self.append_text_to_chat(f"{message}\n\n")
             self.user_input.delete("1.0", "end")
+            self.chat_history.append({"role": "user", "content": message})
 
             Thread(
-                target=self.add_message_to_chat,
-                args=(self.generate_ai_response(),),
+                target=self.generate_ai_response,
                 daemon=True,
             ).start()
 
-    def add_message_to_chat(self, message: Union[str, Generator]):
-        with widget_state_manager(self):
-            if isinstance(message, str):
-                self.append_text_to_chat(f"User: \n", ("Bold", "User"))
-                self.append_text_to_chat(f"{message}")
-                self.chat_history.append({"role": "user", "content": message})
-            else:
-                self.append_text_to_chat(
-                    f"AI ({self.model_select.get()}): \n", ("Bold", "AI")
-                )
-                ai_message = ""
-                for i in message:
-                    self.append_text_to_chat(f"{i}")
-                    ai_message += i
-                self.chat_history.append({"role": "assistant", "content": ai_message})
-            self.append_text_to_chat("\n\n")
-
     def generate_ai_response(self):
+        self.send_button.state(["disabled"])
+        self.refresh_button.state(["disabled"])
+        self.clear_button.state(["disabled"])
+
+        try:
+            self.append_text_to_chat(
+                f"AI ({self.model_select.get()}): \n", ("Bold", "AI")
+            )
+            ai_message = ""
+            for i in self._request_ollama():
+                self.append_text_to_chat(f"{i}")
+                ai_message += i
+            self.chat_history.append({"role": "assistant", "content": ai_message})
+            self.append_text_to_chat("\n\n")
+        except Exception:  # noqa
+            self.append_text_to_chat(tk.END, f"\nAI error!\n\n", ("Error",))
+        finally:
+            self.send_button.state(["!disabled"])
+            self.refresh_button.state(["!disabled"])
+            self.clear_button.state(["!disabled"])
+
+    def _request_ollama(self):
         request = urllib.request.Request(
             f"{self.api_url}/api/chat",
             data=json.dumps(
@@ -190,8 +183,9 @@ class AIChatInterface:
                     yield data["message"]["content"]
 
     def clear_chat(self):
-        with widget_state_manager(self):
-            self.chat_box.delete(1.0, tk.END)
+        self.chat_box.config(state=tk.NORMAL)
+        self.chat_box.delete(1.0, tk.END)
+        self.chat_box.config(state=tk.DISABLED)
         self.chat_history.clear()
 
 
