@@ -18,8 +18,8 @@ def widget_state_manager(self: "AIChatInterface"):
         self.chat_box.config(state=tk.NORMAL)
         self.send_button.state(["disabled"])
         yield
-    except Exception as _:
-        self.chat_box.insert(tk.END, f"\nAI error!\n\n", ("error",))
+    except Exception:  # noqa
+        self.append_text_to_chat(tk.END, f"\nAI error!\n\n", ("Error",))
     finally:
         self.chat_box.config(state=tk.DISABLED)
         self.send_button.state(["!disabled"])
@@ -50,13 +50,7 @@ class AIChatInterface:
         )
         self.refresh_button.grid(row=0, column=1, padx=(10, 0))
 
-        self.error_label = ttk.Label(
-            header_frame, text="", foreground="red"
-        )
-        self.error_label.grid(row=0, column=2, padx=(10, 0), sticky="w")
-
-        host_label = ttk.Label(header_frame, text="Host:")
-        host_label.grid(row=0, column=3, padx=(10, 0))
+        ttk.Label(header_frame, text="Host:").grid(row=0, column=3, padx=(10, 0))
 
         self.host_input = ttk.Entry(header_frame, width=20)
         self.host_input.grid(row=0, column=4, padx=(5, 10))
@@ -106,18 +100,21 @@ class AIChatInterface:
 
         self.refresh_models()
 
+    def append_text_to_chat(self, text, *args):
+        self.chat_box.insert(tk.END, text, *args)
+        self.chat_box.see(tk.END)
+
     def handle_key_press(self, event):
         if event.keysym == "Return":
             if event.state & 0x1 == 0x1:  # Shift key is pressed
                 self.user_input.insert("end", "\n")
-            else:
-                if self.send_button.state() == ("disabled",):
-                    return "break"
+            elif self.send_button.state() != ("disabled",):
                 self.on_send_button(event)
             return "break"
 
     def refresh_models(self):
-        self.model_select.set("waiting...")
+        self.model_select.config(foreground="black")
+        self.model_select.set("Waiting...")
         self.send_button.state(["disabled"])
         self.refresh_button.state(["disabled"])
         self.api_url = self.host_input.get()
@@ -129,7 +126,7 @@ class AIChatInterface:
                 data = json.load(response)
                 models = [model["name"] for model in data["models"]]
                 self.root.after(0, self.update_model_select, models)
-        except Exception as _:
+        except Exception:  # noqa
             self.root.after(0, self.show_error)
         finally:
             self.root.after(0, lambda: self.refresh_button.state(["!disabled"]))
@@ -139,48 +136,43 @@ class AIChatInterface:
         if models:
             self.model_select.set(models[0])
             self.send_button.state(["!disabled"])
-            self.error_label.config(text="")
         else:
             self.show_error()
 
     def show_error(self):
-        self.model_select.set("")
+        self.model_select.set("Error! Please check the host.")
+        self.model_select.config(foreground="red")
         self.model_select["values"] = []
         self.send_button.state(["disabled"])
-        self.error_label.config(text="error")
 
     def on_send_button(self, _=None):
         message = self.user_input.get("1.0", "end-1c").strip()
         if message:
-            self.add_message_to_chat(Sender.User, message)
+            self.add_message_to_chat(message)
             self.user_input.delete("1.0", "end")
 
             Thread(
                 target=self.add_message_to_chat,
-                args=(Sender.AI, self.generate_ai_response()),
+                args=(self.generate_ai_response(),),
                 daemon=True,
             ).start()
 
-    def add_message_to_chat(self, sender: Enum, message: Union[str, Generator]):
+    def add_message_to_chat(self, message: Union[str, Generator]):
         with widget_state_manager(self):
-            _sender_name = (
-                sender.name
-                if sender == Sender.User
-                else f"AI ({self.model_select.get()})"
-            )
-            self.chat_box.insert(tk.END, f"{_sender_name}: \n", ("bold", sender.name))
             if isinstance(message, str):
-                self.chat_box.insert(tk.END, f"{message}")
+                self.append_text_to_chat(f"User: \n", ("Bold", "User"))
+                self.append_text_to_chat(f"{message}")
                 self.chat_history.append({"role": "user", "content": message})
             else:
+                self.append_text_to_chat(
+                    f"AI ({self.model_select.get()}): \n", ("Bold", "AI")
+                )
                 ai_message = ""
                 for i in message:
-                    self.chat_box.insert(tk.END, f"{i}")
+                    self.append_text_to_chat(f"{i}")
                     ai_message += i
                 self.chat_history.append({"role": "assistant", "content": ai_message})
-
-            self.chat_box.insert(tk.END, "\n\n")
-            self.chat_box.see(tk.END)
+            self.append_text_to_chat("\n\n")
 
     def generate_ai_response(self):
         request = urllib.request.Request(
@@ -195,6 +187,7 @@ class AIChatInterface:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+
         with urllib.request.urlopen(request) as resp:
             for line in resp:
                 data = json.loads(line.decode("utf-8"))
@@ -219,10 +212,10 @@ def run():
 
     app = AIChatInterface(root)
 
-    app.chat_box.tag_configure("bold", font=(app.default_font, 12, "bold"))
-    app.chat_box.tag_configure(Sender.User.name, foreground="#007bff")
-    app.chat_box.tag_configure(Sender.AI.name, foreground="#ff007b")
-    app.chat_box.tag_configure("error", foreground="red")
+    app.chat_box.tag_configure("Bold", font=(app.default_font, 12, "bold"))
+    app.chat_box.tag_configure("Error", foreground="red")
+    app.chat_box.tag_configure("User", foreground="#007bff")
+    app.chat_box.tag_configure("AI", foreground="#ff007b")
 
     root.mainloop()
 
