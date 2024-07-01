@@ -108,7 +108,7 @@ class AIChatInterface:
                 models = [model["name"] for model in data["models"]]
                 self.root.after(0, self.update_model_select, models)
         except Exception:  # noqa
-            self.root.after(0, self.show_error)
+            self.root.after(0, self.show_error, "Error! Please check the host.")
         finally:
             self.root.after(0, lambda: self.refresh_button.state(["!disabled"]))
 
@@ -118,10 +118,10 @@ class AIChatInterface:
             self.model_select.set(models[0])
             self.send_button.state(["!disabled"])
         else:
-            self.show_error()
+            self.show_error("You need download a model!")
 
-    def show_error(self):
-        self.model_select.set("Error! Please check the host.")
+    def show_error(self, text):
+        self.model_select.set(text)
         self.model_select.config(foreground="red")
         self.model_select["values"] = []
         self.send_button.state(["disabled"])
