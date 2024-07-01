@@ -5,7 +5,6 @@ import urllib.parse
 import urllib.request
 import tkinter as tk
 
-from enum import Enum
 from tkinter import ttk, font
 from threading import Thread
 from typing import Union, Generator
@@ -23,11 +22,6 @@ def widget_state_manager(self: "AIChatInterface"):
     finally:
         self.chat_box.config(state=tk.DISABLED)
         self.send_button.state(["!disabled"])
-
-
-class Sender(Enum):
-    User = "User"
-    AI = "AI"
 
 
 class AIChatInterface:
