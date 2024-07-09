@@ -12,7 +12,7 @@ from threading import Thread
 class AIChatInterface:
     def __init__(self, root):
         self.root = root
-        self.api_url = "http://localhost:11434"
+        self.api_url = "http://127.0.0.1:11434"
         self.chat_history = []
         self.default_font = font.nametofont("TkTextFont").actual()["family"]
 
