@@ -86,10 +86,11 @@ class AIChatInterface:
         self.right_click_menu.post(event.x_root, event.y_root)
 
     def copy_text(self):
-        selected_text = self.chat_box.get("sel.first", "sel.last")
-        if selected_text:
-            self.chat_box.clipboard_clear()
-            self.chat_box.clipboard_append(selected_text)
+        if self.chat_box.tag_ranges("sel"):
+            selected_text = self.chat_box.get("sel.first", "sel.last")
+            if selected_text:
+                self.chat_box.clipboard_clear()
+                self.chat_box.clipboard_append(selected_text)
 
     def append_text_to_chat(self, text, *args):
         self.chat_box.config(state=tk.NORMAL)
