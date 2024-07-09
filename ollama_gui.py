@@ -1,5 +1,6 @@
 import json
 import time
+import platform
 
 import urllib.parse
 import urllib.request
@@ -7,6 +8,8 @@ import tkinter as tk
 
 from tkinter import ttk, font
 from threading import Thread
+
+_RIGHT_CLICK = "<Button-2>" if platform.system() == "Darwin" else "<Button-3>"
 
 
 class AIChatInterface:
@@ -34,11 +37,6 @@ class AIChatInterface:
         self.host_input = ttk.Entry(header_frame, width=20)
         self.host_input.grid(row=0, column=4, padx=(5, 10))
         self.host_input.insert(0, self.api_url)
-
-        self.clear_button = ttk.Button(
-            header_frame, text="Clear Chat", command=self.clear_chat
-        )
-        self.clear_button.grid(row=0, column=5)
 
         # chat container
         chat_frame = ttk.Frame(root)
@@ -77,7 +75,21 @@ class AIChatInterface:
         self.send_button.grid(row=0, column=1)
         self.send_button.state(["disabled"])
 
+        self.chat_box.bind(_RIGHT_CLICK, self.show_right_click_menu)
+        self.right_click_menu = tk.Menu(self.chat_box, tearoff=0)
+        self.right_click_menu.add_command(label="Copy", command=self.copy_text)
+        self.right_click_menu.add_command(label="Clear Chat", command=self.clear_chat)
+
         self.refresh_models()
+
+    def show_right_click_menu(self, event):
+        self.right_click_menu.post(event.x_root, event.y_root)
+
+    def copy_text(self):
+        selected_text = self.chat_box.get("sel.first", "sel.last")
+        if selected_text:
+            self.chat_box.clipboard_clear()
+            self.chat_box.clipboard_append(selected_text)
 
     def append_text_to_chat(self, text, *args):
         self.chat_box.config(state=tk.NORMAL)
@@ -142,7 +154,6 @@ class AIChatInterface:
     def generate_ai_response(self):
         self.send_button.state(["disabled"])
         self.refresh_button.state(["disabled"])
-        self.clear_button.state(["disabled"])
 
         try:
             self.append_text_to_chat(
@@ -159,7 +170,6 @@ class AIChatInterface:
         finally:
             self.send_button.state(["!disabled"])
             self.refresh_button.state(["!disabled"])
-            self.clear_button.state(["!disabled"])
 
     def _request_ollama(self):
         request = urllib.request.Request(
