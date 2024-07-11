@@ -6,7 +6,7 @@ import urllib.parse
 import urllib.request
 import tkinter as tk
 
-from tkinter import ttk, font
+from tkinter import ttk, font, messagebox
 from threading import Thread
 
 _RIGHT_CLICK = "<Button-2>" if platform.system() == "Darwin" else "<Button-3>"
@@ -80,7 +80,35 @@ class AIChatInterface:
         self.right_click_menu.add_command(label="Copy", command=self.copy_text)
         self.right_click_menu.add_command(label="Clear Chat", command=self.clear_chat)
 
+        self.menubar = tk.Menu(root)
+        root.config(menu=self.menubar)
+
+        self.file_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="File", menu=self.file_menu)
+        self.file_menu.add_command(label="Open Chat", command=self.open_chat)
+        self.file_menu.add_command(label="Save Chat", command=self.save_chat)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Exit", command=root.quit)
+
+        self.edit_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="Edit", menu=self.edit_menu)
+        self.edit_menu.add_command(label="Clear Chat", command=self.clear_chat)
+
+        self.help_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="Help", menu=self.help_menu)
+        self.help_menu.add_command(label="About", command=self.show_about)
+
         self.refresh_models()
+
+    def open_chat(self):
+        pass
+
+    def save_chat(self):
+        pass
+
+    def show_about(self):
+        info = "Project: Ollama GUI\nAuthor: chyok\nGithub: https://github.com/chyok/ollama-gui"
+        messagebox.showinfo("About", info, parent=self.root)
 
     def show_right_click_menu(self, event):
         self.right_click_menu.post(event.x_root, event.y_root)
