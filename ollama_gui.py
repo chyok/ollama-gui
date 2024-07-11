@@ -232,7 +232,10 @@ def run():
     root = tk.Tk()
 
     root.title("Ollama GUI")
-    root.geometry("800x600")
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.geometry(f"800x600+{(screen_width - 800) // 2}+{(screen_height - 600) // 2}")
+
     root.grid_columnconfigure(0, weight=1)
     root.grid_rowconfigure(1, weight=1)
     root.grid_rowconfigure(2, weight=0)
