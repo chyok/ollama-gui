@@ -150,7 +150,7 @@ class AIChatInterface:
         self.help_menu.add_command(label="Source Code", command=self.open_homepage)
         self.help_menu.add_command(label="About", command=self.show_about)
 
-        self.check_system()
+        self.root.after(200, self.check_system)
         self.refresh_models()
 
     def _copy_text(self, text):
