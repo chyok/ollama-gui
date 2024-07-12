@@ -1,15 +1,49 @@
 import json
 import time
 import platform
+import webbrowser
 
 import urllib.parse
 import urllib.request
 import tkinter as tk
 
-from tkinter import ttk, font
+from tkinter import ttk, font, messagebox
 from threading import Thread
+from typing import Optional
 
-_RIGHT_CLICK = "<Button-2>" if platform.system() == "Darwin" else "<Button-3>"
+
+def _system_check(root: tk.Tk) -> Optional[str]:
+    """
+    Detected some system and software compatibility issues,
+    and returned the information in the form of a string to alert the user
+
+    :param root: Tk instance
+    :return: None or message string
+    """
+
+    def _version_tuple(v):
+        """A lazy way to avoid importing third-party libraries"""
+        filled = []
+        for point in v.split("."):
+            filled.append(point.zfill(8))
+        return tuple(filled)
+
+    # Tcl and macOS issue: https://github.com/python/cpython/issues/110218
+    if platform.system().lower() == "darwin":
+        version = platform.mac_ver()[0]
+        if version and 14 <= float(version) < 15:
+            tcl_version = root.tk.call("info", "patchlevel")
+            if _version_tuple(tcl_version) <= _version_tuple("8.6.12"):
+                return ("Warning: Tkinter Responsiveness Issue Detected\n\n"
+                        "You may experience unresponsive GUI elements when "
+                        "your cursor is inside the window during startup. "
+                        "This is a known issue with Tcl/Tk versions 8.6.12 "
+                        "and older on macOS Sonoma.\n\nTo resolve this:\n"
+                        "Update to Python 3.11.7+ or 3.12+\n"
+                        "Or install Tcl/Tk 8.6.13 or newer separately\n\n"
+                        "Temporary workaround: Move your cursor out of "
+                        "the window and back in if elements become unresponsive.\n\n"
+                        "For more information, visit: https://github.com/python/cpython/issues/110218")
 
 
 class AIChatInterface:
@@ -34,13 +68,13 @@ class AIChatInterface:
 
         ttk.Label(header_frame, text="Host:").grid(row=0, column=3, padx=(10, 0))
 
-        self.host_input = ttk.Entry(header_frame, width=20)
-        self.host_input.grid(row=0, column=4, padx=(5, 10))
+        self.host_input = ttk.Entry(header_frame, width=24)
+        self.host_input.grid(row=0, column=4, padx=(5, 15))
         self.host_input.insert(0, self.api_url)
 
         # chat container
         chat_frame = ttk.Frame(root)
-        chat_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        chat_frame.grid(row=1, column=0, sticky="nsew", padx=20)
         chat_frame.grid_columnconfigure(0, weight=1)
         chat_frame.grid_rowconfigure(0, weight=1)
 
@@ -56,13 +90,37 @@ class AIChatInterface:
 
         self.chat_box.configure(yscrollcommand=scrollbar.set)
 
+        chat_box_menu = tk.Menu(self.chat_box, tearoff=0)
+        chat_box_menu.add_command(label="Copy", command=self.copy_select)
+        chat_box_menu.add_command(label="Copy All", command=self.copy_all)
+        chat_box_menu.add_separator()
+        chat_box_menu.add_command(label="Clear Chat", command=self.clear_chat)
+
+        _right_click = "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
+        self.chat_box.bind(_right_click, lambda e: chat_box_menu.post(e.x_root, e.y_root))
+
+        # process bar frame
+        process_frame = ttk.Frame(root, height=28)
+        process_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=10)
+
+        self.progress = ttk.Progressbar(
+            process_frame, mode="indeterminate", style="LoadingBar.Horizontal.TProgressbar"
+        )
+
+        self.stop_button = ttk.Button(
+            process_frame,
+            width=5,
+            text="Stop",
+            command=lambda: self.stop_button.state(["disabled"]),
+        )
+
         # input area
         input_frame = ttk.Frame(root)
-        input_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=20)
+        input_frame.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 20))
         input_frame.grid_columnconfigure(0, weight=1)
 
         self.user_input = tk.Text(
-            input_frame, font=(self.default_font, 12), height=3, wrap=tk.WORD
+            input_frame, font=(self.default_font, 12), height=4, wrap=tk.WORD
         )
         self.user_input.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         self.user_input.bind("<Key>", self.handle_key_press)
@@ -75,22 +133,53 @@ class AIChatInterface:
         self.send_button.grid(row=0, column=1)
         self.send_button.state(["disabled"])
 
-        self.chat_box.bind(_RIGHT_CLICK, self.show_right_click_menu)
-        self.right_click_menu = tk.Menu(self.chat_box, tearoff=0)
-        self.right_click_menu.add_command(label="Copy", command=self.copy_text)
-        self.right_click_menu.add_command(label="Clear Chat", command=self.clear_chat)
+        self.menubar = tk.Menu(root)
+        root.config(menu=self.menubar)
 
+        self.file_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="File", menu=self.file_menu)
+        self.file_menu.add_command(label="Exit", command=root.quit)
+
+        self.edit_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="Edit", menu=self.edit_menu)
+        self.edit_menu.add_command(label="Copy All", command=self.copy_all)
+        self.edit_menu.add_command(label="Clear Chat", command=self.clear_chat)
+
+        self.help_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="Help", menu=self.help_menu)
+        self.help_menu.add_command(label="Source Code", command=self.open_homepage)
+        self.help_menu.add_command(label="About", command=self.show_about)
+
+        self.root.after(200, self.check_system)
         self.refresh_models()
 
-    def show_right_click_menu(self, event):
-        self.right_click_menu.post(event.x_root, event.y_root)
+    def _copy_text(self, text):
+        if text:
+            self.chat_box.clipboard_clear()
+            self.chat_box.clipboard_append(text)
 
-    def copy_text(self):
+    def copy_select(self):
         if self.chat_box.tag_ranges("sel"):
             selected_text = self.chat_box.get("sel.first", "sel.last")
-            if selected_text:
-                self.chat_box.clipboard_clear()
-                self.chat_box.clipboard_append(selected_text)
+            self._copy_text(selected_text)
+
+    def copy_all(self):
+        content = self.chat_box.get("1.0", tk.END)
+        content = content.strip()
+        self._copy_text(content)
+
+    @staticmethod
+    def open_homepage():
+        webbrowser.open("https://github.com/chyok/ollama-gui")
+
+    def show_about(self):
+        info = "Project: Ollama GUI\nAuthor: chyok\nGithub: https://github.com/chyok/ollama-gui"
+        messagebox.showinfo("About", info, parent=self.root)
+
+    def check_system(self):
+        message = _system_check(self.root)
+        if message is not None:
+            messagebox.showwarning("Warning", message, parent=self.root)
 
     def append_text_to_chat(self, text, *args):
         self.chat_box.config(state=tk.NORMAL)
@@ -98,11 +187,21 @@ class AIChatInterface:
         self.chat_box.see(tk.END)
         self.chat_box.config(state=tk.DISABLED)
 
+    def show_process_bar(self):
+        self.progress.grid(row=0, column=0, sticky="nsew")
+        self.stop_button.grid(row=0, column=1, padx=20)
+        self.progress.start(5)
+
+    def hide_process_bar(self):
+        self.progress.stop()
+        self.stop_button.grid_remove()
+        self.progress.grid_remove()
+
     def handle_key_press(self, event):
         if event.keysym == "Return":
             if event.state & 0x1 == 0x1:  # Shift key is pressed
                 self.user_input.insert("end", "\n")
-            elif self.send_button.state() != ("disabled",):
+            elif "disabled" not in self.send_button.state():
                 self.on_send_button(event)
             return "break"
 
@@ -153,6 +252,7 @@ class AIChatInterface:
             ).start()
 
     def generate_ai_response(self):
+        self.show_process_bar()
         self.send_button.state(["disabled"])
         self.refresh_button.state(["disabled"])
 
@@ -169,8 +269,10 @@ class AIChatInterface:
         except Exception:  # noqa
             self.append_text_to_chat(tk.END, f"\nAI error!\n\n", ("Error",))
         finally:
+            self.hide_process_bar()
             self.send_button.state(["!disabled"])
             self.refresh_button.state(["!disabled"])
+            self.stop_button.state(["!disabled"])
 
     def _request_ollama(self):
         request = urllib.request.Request(
@@ -188,6 +290,8 @@ class AIChatInterface:
 
         with urllib.request.urlopen(request) as resp:
             for line in resp:
+                if "disabled" in self.stop_button.state():  # stop
+                    break
                 data = json.loads(line.decode("utf-8"))
                 if "message" in data:
                     time.sleep(0.01)
@@ -204,10 +308,14 @@ def run():
     root = tk.Tk()
 
     root.title("Ollama GUI")
-    root.geometry("800x600")
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.geometry(f"800x600+{(screen_width - 800) // 2}+{(screen_height - 600) // 2}")
+
     root.grid_columnconfigure(0, weight=1)
     root.grid_rowconfigure(1, weight=1)
     root.grid_rowconfigure(2, weight=0)
+    root.grid_rowconfigure(3, weight=0)
 
     app = AIChatInterface(root)
 
