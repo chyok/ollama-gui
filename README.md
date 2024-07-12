@@ -43,11 +43,14 @@ ollama-gui
 ## QA
 ### I'm using a Mac, why does the application sometimes not respond when I click on it?
 
-The issue is that on macOS Sonoma, when the mouse cursor is inside the Tkinter window during its startup, the GUI elements within the window become unresponsive to clicks. This problem occurs specifically with Python 3.11 and does not affect older or newer versions of Python.
+The issue affects macOS Sonoma users running applications that use Tcl/Tk versions 8.6.12 or older, including various Python versions. When the mouse cursor is inside the Tkinter window during startup, GUI elements become unresponsive to clicks.
 
-The root cause is related to changes in the Tcl/Tk library bundled with Python 3.11 on macOS. Upgrading the bundled Tcl/Tk to version 8.6.13 resolves the issue, as this version includes fixes for similar mouse event-related problems on macOS.
+Solution:  
+Update to Tcl/Tk version 8.6.13 or newer, which fixes this problem. For Python users, this can be done by:
 
-The solution is to update the Python 3.11 macOS installers to use the newer Tcl/Tk 8.6.13 library. This change has been merged and will be released in Python 3.11.7. Users affected by this bug can either wait for the 3.11.7 release or try using Python 3.12 or older versions like 3.10, which do not exhibit this problem.
+Using Python 3.11.7 or later, which bundles the fixed Tcl/Tk version.
+Using Python 3.12 or later, which already includes the fix.
+For other Python versions, installing Tcl/Tk 8.6.13+ separately (e.g., via Homebrew) and ensuring Python uses this version.
 
 here is the issue: https://github.com/python/cpython/issues/110218
 
