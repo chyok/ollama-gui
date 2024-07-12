@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ollama-gui"
-version = "1.0.4"
+version = "1.1.0"
 description = "A very simple ollama GUI, implemented using the built-in Python Tkinter library, with no additional dependencies."
 authors = ["chyok <chyok@hotmail.com>"]
 license = "MIT"
