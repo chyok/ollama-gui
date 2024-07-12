@@ -7,10 +7,10 @@ import urllib.parse
 import urllib.request
 import tkinter as tk
 
-from tkinter import ttk, font, messagebox, filedialog
+from tkinter import ttk, font, messagebox
 from threading import Thread
 
-_RIGHT_CLICK = "<Button-2>" if platform.system() == "Darwin" else "<Button-3>"
+_RIGHT_CLICK = "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
 
 
 class AIChatInterface:
@@ -57,6 +57,14 @@ class AIChatInterface:
 
         self.chat_box.configure(yscrollcommand=scrollbar.set)
 
+        chat_box_menu = tk.Menu(self.chat_box, tearoff=0)
+        chat_box_menu.add_command(label="Copy", command=self.copy_select)
+        chat_box_menu.add_command(label="Copy All", command=self.copy_all)
+        chat_box_menu.add_separator()
+        chat_box_menu.add_command(label="Clear Chat", command=self.clear_chat)
+
+        self.chat_box.bind(_RIGHT_CLICK, lambda e: chat_box_menu.post(e.x_root, e.y_root))
+
         # input area
         input_frame = ttk.Frame(root)
         input_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=20)
@@ -75,11 +83,6 @@ class AIChatInterface:
         )
         self.send_button.grid(row=0, column=1)
         self.send_button.state(["disabled"])
-
-        self.chat_box.bind(_RIGHT_CLICK, self.show_right_click_menu)
-        self.right_click_menu = tk.Menu(self.chat_box, tearoff=0)
-        self.right_click_menu.add_command(label="Copy", command=self.copy_select)
-        self.right_click_menu.add_command(label="Clear Chat", command=self.clear_chat)
 
         self.menubar = tk.Menu(root)
         root.config(menu=self.menubar)
@@ -122,9 +125,6 @@ class AIChatInterface:
     def show_about(self):
         info = "Project: Ollama GUI\nAuthor: chyok\nGithub: https://github.com/chyok/ollama-gui"
         messagebox.showinfo("About", info, parent=self.root)
-
-    def show_right_click_menu(self, event):
-        self.right_click_menu.post(event.x_root, event.y_root)
 
     def append_text_to_chat(self, text, *args):
         self.chat_box.config(state=tk.NORMAL)
