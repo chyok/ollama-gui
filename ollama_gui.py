@@ -111,7 +111,7 @@ class AIChatInterface:
             process_frame,
             width=5,
             text="Stop",
-            command=self.on_send_button,
+            command=lambda: self.stop_button.state(["disabled"]),
         )
 
         # input area
@@ -120,7 +120,7 @@ class AIChatInterface:
         input_frame.grid_columnconfigure(0, weight=1)
 
         self.user_input = tk.Text(
-            input_frame, font=(self.default_font, 12), height=3, wrap=tk.WORD
+            input_frame, font=(self.default_font, 12), height=4, wrap=tk.WORD
         )
         self.user_input.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         self.user_input.bind("<Key>", self.handle_key_press)
@@ -190,12 +190,18 @@ class AIChatInterface:
     def show_process_bar(self):
         self.progress.grid(row=0, column=0, sticky="nsew")
         self.stop_button.grid(row=0, column=1, padx=20)
+        self.progress.start(5)
+
+    def hide_process_bar(self):
+        self.progress.stop()
+        self.stop_button.grid_remove()
+        self.progress.grid_remove()
 
     def handle_key_press(self, event):
         if event.keysym == "Return":
             if event.state & 0x1 == 0x1:  # Shift key is pressed
                 self.user_input.insert("end", "\n")
-            elif self.send_button.state() != ("disabled",):
+            elif "disabled" not in self.send_button.state():
                 self.on_send_button(event)
             return "break"
 
@@ -233,7 +239,6 @@ class AIChatInterface:
         self.send_button.state(["disabled"])
 
     def on_send_button(self, _=None):
-        self.show_process_bar()
         message = self.user_input.get("1.0", "end-1c").strip()
         if message:
             self.append_text_to_chat(f"User: \n", ("Bold", "User"))
@@ -247,6 +252,7 @@ class AIChatInterface:
             ).start()
 
     def generate_ai_response(self):
+        self.show_process_bar()
         self.send_button.state(["disabled"])
         self.refresh_button.state(["disabled"])
 
@@ -263,8 +269,10 @@ class AIChatInterface:
         except Exception:  # noqa
             self.append_text_to_chat(tk.END, f"\nAI error!\n\n", ("Error",))
         finally:
+            self.hide_process_bar()
             self.send_button.state(["!disabled"])
             self.refresh_button.state(["!disabled"])
+            self.stop_button.state(["!disabled"])
 
     def _request_ollama(self):
         request = urllib.request.Request(
@@ -282,6 +290,8 @@ class AIChatInterface:
 
         with urllib.request.urlopen(request) as resp:
             for line in resp:
+                if "disabled" in self.stop_button.state():  # stop
+                    break
                 data = json.loads(line.decode("utf-8"))
                 if "message" in data:
                     time.sleep(0.01)
