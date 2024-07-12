@@ -41,7 +41,7 @@ class AIChatInterface:
 
         # chat container
         chat_frame = ttk.Frame(root)
-        chat_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        chat_frame.grid(row=1, column=0, sticky="nsew", padx=20)
         chat_frame.grid_columnconfigure(0, weight=1)
         chat_frame.grid_rowconfigure(0, weight=1)
 
@@ -65,9 +65,24 @@ class AIChatInterface:
 
         self.chat_box.bind(_RIGHT_CLICK, lambda e: chat_box_menu.post(e.x_root, e.y_root))
 
+        # process bar frame
+        process_frame = ttk.Frame(root, height=28)
+        process_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=10)
+
+        self.progress = ttk.Progressbar(
+            process_frame, mode="indeterminate", style="LoadingBar.Horizontal.TProgressbar"
+        )
+
+        self.stop_button = ttk.Button(
+            process_frame,
+            width=5,
+            text="Stop",
+            command=self.on_send_button,
+        )
+
         # input area
         input_frame = ttk.Frame(root)
-        input_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=20)
+        input_frame.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 20))
         input_frame.grid_columnconfigure(0, weight=1)
 
         self.user_input = tk.Text(
@@ -132,6 +147,10 @@ class AIChatInterface:
         self.chat_box.see(tk.END)
         self.chat_box.config(state=tk.DISABLED)
 
+    def show_process_bar(self):
+        self.progress.grid(row=0, column=0, sticky="nsew")
+        self.stop_button.grid(row=0, column=1, padx=20)
+
     def handle_key_press(self, event):
         if event.keysym == "Return":
             if event.state & 0x1 == 0x1:  # Shift key is pressed
@@ -174,6 +193,7 @@ class AIChatInterface:
         self.send_button.state(["disabled"])
 
     def on_send_button(self, _=None):
+        self.show_process_bar()
         message = self.user_input.get("1.0", "end-1c").strip()
         if message:
             self.append_text_to_chat(f"User: \n", ("Bold", "User"))
@@ -245,6 +265,7 @@ def run():
     root.grid_columnconfigure(0, weight=1)
     root.grid_rowconfigure(1, weight=1)
     root.grid_rowconfigure(2, weight=0)
+    root.grid_rowconfigure(3, weight=0)
 
     app = AIChatInterface(root)
 
