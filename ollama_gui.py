@@ -35,8 +35,8 @@ class AIChatInterface:
 
         ttk.Label(header_frame, text="Host:").grid(row=0, column=3, padx=(10, 0))
 
-        self.host_input = ttk.Entry(header_frame, width=20)
-        self.host_input.grid(row=0, column=4, padx=(5, 10))
+        self.host_input = ttk.Entry(header_frame, width=24)
+        self.host_input.grid(row=0, column=4, padx=(5, 15))
         self.host_input.insert(0, self.api_url)
 
         # chat container
