@@ -1,12 +1,13 @@
 import json
 import time
 import platform
+import webbrowser
 
 import urllib.parse
 import urllib.request
 import tkinter as tk
 
-from tkinter import ttk, font, messagebox
+from tkinter import ttk, font, messagebox, filedialog
 from threading import Thread
 
 _RIGHT_CLICK = "<Button-2>" if platform.system() == "Darwin" else "<Button-3>"
@@ -77,7 +78,7 @@ class AIChatInterface:
 
         self.chat_box.bind(_RIGHT_CLICK, self.show_right_click_menu)
         self.right_click_menu = tk.Menu(self.chat_box, tearoff=0)
-        self.right_click_menu.add_command(label="Copy", command=self.copy_text)
+        self.right_click_menu.add_command(label="Copy", command=self.copy_select)
         self.right_click_menu.add_command(label="Clear Chat", command=self.clear_chat)
 
         self.menubar = tk.Menu(root)
@@ -85,26 +86,38 @@ class AIChatInterface:
 
         self.file_menu = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label="File", menu=self.file_menu)
-        self.file_menu.add_command(label="Open Chat", command=self.open_chat)
-        self.file_menu.add_command(label="Save Chat", command=self.save_chat)
-        self.file_menu.add_separator()
         self.file_menu.add_command(label="Exit", command=root.quit)
 
         self.edit_menu = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label="Edit", menu=self.edit_menu)
+        self.edit_menu.add_command(label="Copy All", command=self.copy_all)
         self.edit_menu.add_command(label="Clear Chat", command=self.clear_chat)
 
         self.help_menu = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label="Help", menu=self.help_menu)
+        self.help_menu.add_command(label="Source Code", command=self.open_homepage)
         self.help_menu.add_command(label="About", command=self.show_about)
 
         self.refresh_models()
 
-    def open_chat(self):
-        pass
+    def _copy_text(self, text):
+        if text:
+            self.chat_box.clipboard_clear()
+            self.chat_box.clipboard_append(text)
 
-    def save_chat(self):
-        pass
+    def copy_select(self):
+        if self.chat_box.tag_ranges("sel"):
+            selected_text = self.chat_box.get("sel.first", "sel.last")
+            self._copy_text(selected_text)
+
+    def copy_all(self):
+        content = self.chat_box.get("1.0", tk.END)
+        content = content.strip()
+        self._copy_text(content)
+
+    @staticmethod
+    def open_homepage():
+        webbrowser.open("https://github.com/chyok/ollama-gui")
 
     def show_about(self):
         info = "Project: Ollama GUI\nAuthor: chyok\nGithub: https://github.com/chyok/ollama-gui"
@@ -112,13 +125,6 @@ class AIChatInterface:
 
     def show_right_click_menu(self, event):
         self.right_click_menu.post(event.x_root, event.y_root)
-
-    def copy_text(self):
-        if self.chat_box.tag_ranges("sel"):
-            selected_text = self.chat_box.get("sel.first", "sel.last")
-            if selected_text:
-                self.chat_box.clipboard_clear()
-                self.chat_box.clipboard_append(selected_text)
 
     def append_text_to_chat(self, text, *args):
         self.chat_box.config(state=tk.NORMAL)
