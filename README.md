@@ -19,7 +19,7 @@ Provide you with the simplest possible visual Ollama interface.
 + 📋 Menu bar and right-click menu.
 + 🛑 Stop generating at any time.
 
-## 📎Before Start
+## 📎 Before Start
 
 We need to set up llama service first.
 
