@@ -51,6 +51,7 @@ ollama-gui
 |----------|----------------------------------------------------------|
 | Windows  | [Download](https://github.com/chyok/ollama-gui/releases) |
 | Mac (Apple Silicon)  | [Download](https://github.com/chyok/ollama-gui/releases) |
+| Linux  | [Download](https://github.com/chyok/ollama-gui/releases) |
 
 ## 📋 Q&A
 ### I'm using a Mac, why does the application sometimes not respond when I click on it?
@@ -69,6 +70,35 @@ https://www.python.org/downloads/macos/
 For other Python versions, installing Tcl/Tk 8.6.13+ separately (e.g., via Homebrew) and ensuring Python uses this version.
 
 Here is the issue: https://github.com/python/cpython/issues/110218
+
+
+### ImportError: No module named 'Tkinter'
+
+This probably happens because the Tk library is not installed.
+
+For Ubuntu or other distros with Apt:
+
+```
+sudo apt-get install python3-tk
+```
+
+For Fedora:
+
+```
+sudo dnf install python3-tkinter
+```
+
+For macOS:
+
+```
+brew install python-tk
+```
+
+For Windows:
+
+make sure to **check in the Python install the optional feature "tcl/tk and IDLE"**.  
+
+Refer to: https://stackoverflow.com/questions/25905540/importerror-no-module-named-tkinter
 
 ## License
 
