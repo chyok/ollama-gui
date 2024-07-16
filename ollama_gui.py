@@ -418,6 +418,7 @@ class OllamaInterface:
     def clear_chat(self):
         for i in self.label_widgets:
             i.destroy()
+        self.label_widgets.clear()
         self.chat_box.config(state=tk.NORMAL)
         self.chat_box.delete(1.0, tk.END)
         self.chat_box.config(state=tk.DISABLED)
