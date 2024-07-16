@@ -141,9 +141,11 @@ class OllamaInterface:
         editor_window.grid_columnconfigure(1, weight=1)
 
         def _save():
-            inner_label.config(text=chat_editor.get("1.0", "end-1c"))
             idx = self.label_widgets.index(inner_label)
-            self.chat_history[idx]["content"] = chat_editor.get("1.0", "end-1c")
+            if len(self.chat_history) > idx:
+                self.chat_history[idx]["content"] = chat_editor.get("1.0", "end-1c")
+                inner_label.config(text=chat_editor.get("1.0", "end-1c"))
+
             editor_window.destroy()
 
         save_button = tk.Button(editor_window, text="Save", command=_save)
@@ -176,6 +178,8 @@ class OllamaInterface:
             font=(self.default_font, 12),
             borderwidth=0,
         )
+        self.label_widgets.append(inner_label)
+
         inner_label.bind("<MouseWheel>", self._on_mousewheel)
         inner_label.bind("<Double-1>", lambda e: self.on_double_click(e, inner_label))
 
@@ -193,7 +197,6 @@ class OllamaInterface:
         )
         inner_label.bind(_right_click, lambda e: _right_menu.post(e.x_root, e.y_root))
         self.chat_box.window_create(tk.END, window=inner_label)
-        self.label_widgets.append(inner_label)
         if on_right_side:
             idx = self.chat_box.index("end-1c").split(".")[0]
             self.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
