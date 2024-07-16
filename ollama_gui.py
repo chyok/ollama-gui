@@ -371,6 +371,7 @@ class OllamaInterface:
             self.append_log(f"Failed to delete model: {e}")
         finally:
             self.update_model_list()
+            self.update_model_select()
 
     def download_model(self, model_name, insecure=False):
         self.append_log("", delete=True)
@@ -407,6 +408,7 @@ class OllamaInterface:
             self.append_log(f"Failed to download model: {e}")
         finally:
             self.update_model_list()
+            self.update_model_select()
             if self.download_button.winfo_exists():
                 self.download_button.state(["!disabled"])
 
