@@ -8,6 +8,9 @@ import webbrowser
 import urllib.parse
 import urllib.request
 
+from threading import Thread
+from typing import Optional, List, Generator
+
 try:
     import tkinter as tk
     from tkinter import ttk, font, messagebox
@@ -18,8 +21,7 @@ except (ModuleNotFoundError, ImportError):
         "Please refer to https://github.com/chyok/ollama-gui?tab=readme-ov-file#-qa")
     sys.exit(0)
 
-from threading import Thread
-from typing import Optional, List
+__version__ = "1.2.1"
 
 
 def _system_check(root: tk.Tk) -> Optional[str]:
@@ -71,7 +73,6 @@ class OllamaInterface:
     model_select: ttk.Combobox
     log_textbox: tk.Text
     models_list: tk.Listbox
-    editor_window: Optional[tk.Toplevel] = None
 
     def __init__(self, root: tk.Tk):
         self.root: tk.Tk = root
@@ -80,31 +81,32 @@ class OllamaInterface:
         self.label_widgets: List[tk.Label] = []
         self.default_font: str = font.nametofont("TkTextFont").actual()["family"]
 
-        LayoutManager(self).init_layout()
+        self.layout = LayoutManager(self)
+        self.layout.init_layout()
 
         self.root.after(200, self.check_system)
         self.refresh_models()
-        self.chat_box.bind("<Configure>", self._resize_inner_text_widget)
 
-    def _copy_text(self, text):
+    def copy_text(self, text: str):
         if text:
             self.chat_box.clipboard_clear()
             self.chat_box.clipboard_append(text)
 
-    def copy_select(self):
-        if self.chat_box.tag_ranges("sel"):
-            selected_text = self.chat_box.get("sel.first", "sel.last")
-            self._copy_text(selected_text)
-
     def copy_all(self):
-        self._copy_text(pprint.pformat(self.chat_history))
+        self.copy_text(pprint.pformat(self.chat_history))
 
     @staticmethod
     def open_homepage():
         webbrowser.open("https://github.com/chyok/ollama-gui")
 
-    def show_about(self):
-        info = "Project: Ollama GUI\nAuthor: chyok\nGithub: https://github.com/chyok/ollama-gui"
+    def show_help(self):
+        info = ("Project: Ollama GUI\n"
+                f"Version: {__version__}\n"
+                "Author: chyok\n"
+                "Github: https://github.com/chyok/ollama-gui\n\n"
+                "<Enter>: send\n"
+                "<Shift+Enter>: new line\n"
+                "<Double click dialog>: edit dialog\n")
         messagebox.showinfo("About", info, parent=self.root)
 
     def check_system(self):
@@ -112,117 +114,42 @@ class OllamaInterface:
         if message is not None:
             messagebox.showwarning("Warning", message, parent=self.root)
 
-    def append_text_to_chat(self, text, *args):
+    def append_text_to_chat(self,
+                            text: str,
+                            *args,
+                            use_label: bool = False):
         self.chat_box.config(state=tk.NORMAL)
-        self.chat_box.insert(tk.END, text, *args)
+        if use_label:
+            cur_label_widget = self.label_widgets[-1]
+            cur_label_widget.config(text=cur_label_widget.cget("text") + text)
+        else:
+            self.chat_box.insert(tk.END, text, *args)
         self.chat_box.see(tk.END)
         self.chat_box.config(state=tk.DISABLED)
 
-    def on_double_click(self, event, inner_label):
-        if self.editor_window and self.editor_window.winfo_exists():
-            self.editor_window.lift()
-            return
+    def append_log_to_inner_textbox(self,
+                                    message: Optional[str] = None,
+                                    clear: bool = False):
+        if self.log_textbox.winfo_exists():
+            self.log_textbox.config(state=tk.NORMAL)
+            if clear:
+                self.log_textbox.delete(1.0, tk.END)
+            elif message:
+                self.log_textbox.insert(tk.END, message + "\n")
+            self.log_textbox.config(state=tk.DISABLED)
+            self.log_textbox.see(tk.END)
 
-        editor_window = tk.Toplevel(self.root)
-        editor_window.title("Chat Editor")
-
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = int((screen_width / 2) - (400 / 2))
-        y = int((screen_height / 2) - (300 / 2))
-
-        editor_window.geometry(f"{400}x{300}+{x}+{y}")
-
-        chat_editor = tk.Text(editor_window)
-        chat_editor.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
-        chat_editor.insert(tk.END, inner_label.cget("text"))
-        editor_window.grid_rowconfigure(0, weight=1)
-        editor_window.grid_columnconfigure(0, weight=1)
-        editor_window.grid_columnconfigure(1, weight=1)
-
-        def _save():
-            idx = self.label_widgets.index(inner_label)
-            if len(self.chat_history) > idx:
-                self.chat_history[idx]["content"] = chat_editor.get("1.0", "end-1c")
-                inner_label.config(text=chat_editor.get("1.0", "end-1c"))
-
-            editor_window.destroy()
-
-        save_button = tk.Button(editor_window, text="Save", command=_save)
-        save_button.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-
-        cancel_button = tk.Button(
-            editor_window, text="Cancel", command=editor_window.destroy
-        )
-        cancel_button.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-
-        editor_window.grid_columnconfigure(0, weight=1, uniform="btn")
-        editor_window.grid_columnconfigure(1, weight=1, uniform="btn")
-
-        self.editor_window = editor_window
-
-    def create_inner_label(self, on_right_side: bool = False):
-        background = "#48a4f2" if on_right_side else "#eaeaea"
-        foreground = "white" if on_right_side else "black"
-        max_width = int(self.chat_box.winfo_reqwidth()) * 0.7
-        inner_label = tk.Label(
-            self.chat_box,
-            justify=tk.LEFT,
-            wraplength=max_width,
-            background=background,
-            highlightthickness=0,
-            highlightbackground=background,
-            foreground=foreground,
-            padx=8,
-            pady=8,
-            font=(self.default_font, 12),
-            borderwidth=0,
-        )
-        self.label_widgets.append(inner_label)
-
-        inner_label.bind("<MouseWheel>", self._on_mousewheel)
-        inner_label.bind("<Double-1>", lambda e: self.on_double_click(e, inner_label))
-
-        _right_menu = tk.Menu(inner_label, tearoff=0)
-        _right_menu.add_command(
-            label="Edit", command=lambda: self.on_double_click(None, inner_label)
-        )
-        _right_menu.add_command(
-            label="Copy This", command=lambda: self._copy_text(inner_label.cget("text"))
-        )
-        _right_menu.add_separator()
-        _right_menu.add_command(label="Clear Chat", command=self.clear_chat)
-        _right_click = (
-            "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
-        )
-        inner_label.bind(_right_click, lambda e: _right_menu.post(e.x_root, e.y_root))
-        self.chat_box.window_create(tk.END, window=inner_label)
-        if on_right_side:
-            idx = self.chat_box.index("end-1c").split(".")[0]
-            self.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
-
-    def _resize_inner_text_widget(self, event):
+    def resize_inner_text_widget(self, event: tk.Event):
         for i in self.label_widgets:
             current_width = event.widget.winfo_width()
             max_width = int(current_width) * 0.7
             i.config(wraplength=max_width)
 
-    def append_child_label_to_chat(self, text, *args):
-        self.chat_box.config(state=tk.NORMAL)
-        cur_label_widget = self.label_widgets[-1]
-        cur_label_widget.config(text=cur_label_widget.cget("text") + text)
-        self.chat_box.see(tk.END)
-        self.chat_box.config(state=tk.DISABLED)
-
-    def append_log(self, message, delete=False):
-        if self.log_textbox.winfo_exists():
-            self.log_textbox.config(state=tk.NORMAL)
-            if delete:
-                self.log_textbox.delete(1.0, tk.END)
-            else:
-                self.log_textbox.insert(tk.END, message + "\n")
-            self.log_textbox.config(state=tk.DISABLED)
-            self.log_textbox.see(tk.END)
+    def show_error(self, text):
+        self.model_select.set(text)
+        self.model_select.config(foreground="red")
+        self.model_select["values"] = []
+        self.send_button.state(["disabled"])
 
     def show_process_bar(self):
         self.progress.grid(row=0, column=0, sticky="nsew")
@@ -234,7 +161,7 @@ class OllamaInterface:
         self.stop_button.grid_remove()
         self.progress.grid_remove()
 
-    def handle_key_press(self, event):
+    def handle_key_press(self, event: tk.Event):
         if event.keysym == "Return":
             if event.state & 0x1 == 0x1:  # Shift key is pressed
                 self.user_input.insert("end", "\n")
@@ -275,23 +202,13 @@ class OllamaInterface:
                 for model in models:
                     self.models_list.insert(tk.END, model)
             except Exception:  # noqa
-                self.append_log("Error! Please check the Ollama host.")
-
-    def show_error(self, text):
-        self.model_select.set(text)
-        self.model_select.config(foreground="red")
-        self.model_select["values"] = []
-        self.send_button.state(["disabled"])
-
-    def _on_mousewheel(self, event):
-        self.chat_box.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                self.append_log_to_inner_textbox("Error! Please check the Ollama host.")
 
     def on_send_button(self, _=None):
         message = self.user_input.get("1.0", "end-1c")
         if message:
-            self.create_inner_label(on_right_side=True)
-
-            self.append_child_label_to_chat(f"{message}")
+            self.layout.create_inner_label(on_right_side=True)
+            self.append_text_to_chat(f"{message}", use_label=True)
             self.append_text_to_chat(f"\n\n")
             self.user_input.delete("1.0", "end")
             self.chat_history.append({"role": "user", "content": message})
@@ -309,9 +226,9 @@ class OllamaInterface:
         try:
             self.append_text_to_chat(f"{self.model_select.get()}\n", ("Bold",))
             ai_message = ""
-            self.create_inner_label()
-            for i in self._request_ollama():
-                self.append_child_label_to_chat(f"{i}")
+            self.layout.create_inner_label()
+            for i in self.fetch_chat_stream_result():
+                self.append_text_to_chat(f"{i}", use_label=True)
                 ai_message += i
             self.chat_history.append({"role": "assistant", "content": ai_message})
             self.append_text_to_chat("\n\n")
@@ -331,7 +248,7 @@ class OllamaInterface:
             models = [model["name"] for model in data["models"]]
             return models
 
-    def _request_ollama(self):
+    def fetch_chat_stream_result(self) -> Generator:
         request = urllib.request.Request(
             urllib.parse.urljoin(self.api_url, "/api/chat"),
             data=json.dumps(
@@ -354,8 +271,8 @@ class OllamaInterface:
                     time.sleep(0.01)
                     yield data["message"]["content"]
 
-    def delete_model(self, model_name):
-        self.append_log("", delete=True)
+    def delete_model(self, model_name: str):
+        self.append_log_to_inner_textbox(clear=True)
         if not model_name:
             return
 
@@ -367,17 +284,17 @@ class OllamaInterface:
         try:
             with urllib.request.urlopen(req) as response:
                 if response.status == 200:
-                    self.append_log("Model deleted successfully.")
+                    self.append_log_to_inner_textbox("Model deleted successfully.")
                 elif response.status == 404:
-                    self.append_log("Model not found.")
+                    self.append_log_to_inner_textbox("Model not found.")
         except Exception as e:
-            self.append_log(f"Failed to delete model: {e}")
+            self.append_log_to_inner_textbox(f"Failed to delete model: {e}")
         finally:
             self.update_model_list()
             self.update_model_select()
 
-    def download_model(self, model_name, insecure=False):
-        self.append_log("", delete=True)
+    def download_model(self, model_name: str, insecure: bool = False):
+        self.append_log_to_inner_textbox(clear=True)
         if not model_name:
             return
 
@@ -394,21 +311,15 @@ class OllamaInterface:
             with urllib.request.urlopen(req) as response:
                 for line in response:
                     data = json.loads(line.decode("utf-8"))
-                    if data.get("error"):
-                        log = data["error"]
-                    elif data.get("status"):
-                        log = data["status"]
-                        if data.get("total") and data.get("completed"):
-                            log += f" [{data['completed']}/{data['total']}]"
-                        elif data.get("total"):
-                            log += f" [0/{data['total']}]"
-
-                    else:
-                        log = "no response"
-                    self.append_log(log)
-
+                    log = data.get("error") or data.get("status") or "No response"
+                    if "status" in data:
+                        total = data.get("total")
+                        completed = data.get("completed", 0)
+                        if total:
+                            log += f" [{completed}/{total}]"
+                    self.append_log_to_inner_textbox(log)
         except Exception as e:
-            self.append_log(f"Failed to download model: {e}")
+            self.append_log_to_inner_textbox(f"Failed to download model: {e}")
         finally:
             self.update_model_list()
             self.update_model_select()
@@ -439,6 +350,7 @@ class LayoutManager:
     def __init__(self, interface: OllamaInterface):
         self.interface: OllamaInterface = interface
         self.management_window: Optional[tk.Toplevel] = None
+        self.editor_window: Optional[tk.Toplevel] = None
 
     def init_layout(self):
         self._header_frame()
@@ -455,7 +367,7 @@ class LayoutManager:
         model_select.grid(row=0, column=0)
 
         settings_button = ttk.Button(
-            header_frame, text="⚙️", command=self.open_model_management_window, width=3
+            header_frame, text="⚙️", command=self.show_model_management_window, width=3
         )
         settings_button.grid(row=0, column=1, padx=(5, 0))
 
@@ -494,10 +406,10 @@ class LayoutManager:
         chat_box.configure(yscrollcommand=scrollbar.set)
 
         chat_box_menu = tk.Menu(chat_box, tearoff=0)
-        chat_box_menu.add_command(label="Copy", command=self.interface.copy_select)
         chat_box_menu.add_command(label="Copy All", command=self.interface.copy_all)
         chat_box_menu.add_separator()
         chat_box_menu.add_command(label="Clear Chat", command=self.interface.clear_chat)
+        chat_box.bind("<Configure>", self.interface.resize_inner_text_widget)
 
         _right_click = (
             "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
@@ -550,7 +462,7 @@ class LayoutManager:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Model Management", command=self.open_model_management_window)
+        file_menu.add_command(label="Model Management", command=self.show_model_management_window)
         file_menu.add_command(label="Exit", command=self.interface.root.quit)
 
         edit_menu = tk.Menu(menubar, tearoff=0)
@@ -561,12 +473,12 @@ class LayoutManager:
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="Source Code", command=self.interface.open_homepage)
-        help_menu.add_command(label="About", command=self.interface.show_about)
+        help_menu.add_command(label="Help", command=self.interface.show_help)
 
         self.interface.user_input = user_input
         self.interface.send_button = send_button
 
-    def open_model_management_window(self):
+    def show_model_management_window(self):
         self.interface.update_host()
 
         if self.management_window and self.management_window.winfo_exists():
@@ -646,6 +558,95 @@ class LayoutManager:
         Thread(
             target=self.interface.update_model_list, daemon=True,
         ).start()
+
+    def show_editor_window(self, _, inner_label):
+        if self.editor_window and self.editor_window.winfo_exists():
+            self.editor_window.lift()
+            return
+
+        editor_window = tk.Toplevel(self.interface.root)
+        editor_window.title("Chat Editor")
+
+        screen_width = self.interface.root.winfo_screenwidth()
+        screen_height = self.interface.root.winfo_screenheight()
+
+        x = int((screen_width / 2) - (400 / 2))
+        y = int((screen_height / 2) - (300 / 2))
+
+        editor_window.geometry(f"{400}x{300}+{x}+{y}")
+
+        chat_editor = tk.Text(editor_window)
+        chat_editor.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        chat_editor.insert(tk.END, inner_label.cget("text"))
+
+        editor_window.grid_rowconfigure(0, weight=1)
+        editor_window.grid_columnconfigure(0, weight=1)
+        editor_window.grid_columnconfigure(1, weight=1)
+
+        def _save():
+            idx = self.interface.label_widgets.index(inner_label)
+            if len(self.interface.chat_history) > idx:
+                self.interface.chat_history[idx]["content"] = chat_editor.get("1.0", "end-1c")
+                inner_label.config(text=chat_editor.get("1.0", "end-1c"))
+
+            editor_window.destroy()
+
+        save_button = tk.Button(editor_window, text="Save", command=_save)
+        save_button.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+
+        cancel_button = tk.Button(
+            editor_window, text="Cancel", command=editor_window.destroy
+        )
+        cancel_button.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+
+        editor_window.grid_columnconfigure(0, weight=1, uniform="btn")
+        editor_window.grid_columnconfigure(1, weight=1, uniform="btn")
+
+        self.editor_window = editor_window
+
+    def create_inner_label(self, on_right_side: bool = False):
+        background = "#48a4f2" if on_right_side else "#eaeaea"
+        foreground = "white" if on_right_side else "black"
+        max_width = int(self.interface.chat_box.winfo_reqwidth()) * 0.7
+        inner_label = tk.Label(
+            self.interface.chat_box,
+            justify=tk.LEFT,
+            wraplength=max_width,
+            background=background,
+            highlightthickness=0,
+            highlightbackground=background,
+            foreground=foreground,
+            padx=8,
+            pady=8,
+            font=(self.interface.default_font, 12),
+            borderwidth=0,
+        )
+        self.interface.label_widgets.append(inner_label)
+
+        inner_label.bind(
+            "<MouseWheel>",
+            lambda e:
+            self.interface.chat_box.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        )
+        inner_label.bind("<Double-1>", lambda e: self.show_editor_window(e, inner_label))
+
+        _right_menu = tk.Menu(inner_label, tearoff=0)
+        _right_menu.add_command(
+            label="Edit", command=lambda: self.show_editor_window(None, inner_label)
+        )
+        _right_menu.add_command(
+            label="Copy This", command=lambda: self.interface.copy_text(inner_label.cget("text"))
+        )
+        _right_menu.add_separator()
+        _right_menu.add_command(label="Clear Chat", command=self.interface.clear_chat)
+        _right_click = (
+            "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
+        )
+        inner_label.bind(_right_click, lambda e: _right_menu.post(e.x_root, e.y_root))
+        self.interface.chat_box.window_create(tk.END, window=inner_label)
+        if on_right_side:
+            idx = self.interface.chat_box.index("end-1c").split(".")[0]
+            self.interface.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
 
 
 def run():
