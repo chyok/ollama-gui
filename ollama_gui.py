@@ -8,6 +8,9 @@ import webbrowser
 import urllib.parse
 import urllib.request
 
+from threading import Thread
+from typing import Optional, List
+
 try:
     import tkinter as tk
     from tkinter import ttk, font, messagebox
@@ -18,8 +21,7 @@ except (ModuleNotFoundError, ImportError):
         "Please refer to https://github.com/chyok/ollama-gui?tab=readme-ov-file#-qa")
     sys.exit(0)
 
-from threading import Thread
-from typing import Optional, List
+__version__ = "1.2.1"
 
 
 def _system_check(root: tk.Tk) -> Optional[str]:
@@ -84,17 +86,11 @@ class OllamaInterface:
 
         self.root.after(200, self.check_system)
         self.refresh_models()
-        self.chat_box.bind("<Configure>", self._resize_inner_text_widget)
 
     def _copy_text(self, text):
         if text:
             self.chat_box.clipboard_clear()
             self.chat_box.clipboard_append(text)
-
-    def copy_select(self):
-        if self.chat_box.tag_ranges("sel"):
-            selected_text = self.chat_box.get("sel.first", "sel.last")
-            self._copy_text(selected_text)
 
     def copy_all(self):
         self._copy_text(pprint.pformat(self.chat_history))
@@ -103,8 +99,13 @@ class OllamaInterface:
     def open_homepage():
         webbrowser.open("https://github.com/chyok/ollama-gui")
 
-    def show_about(self):
-        info = "Project: Ollama GUI\nAuthor: chyok\nGithub: https://github.com/chyok/ollama-gui"
+    def show_help(self):
+        info = ("Project: Ollama GUI\n"
+                "Author: chyok\n"
+                "Github: https://github.com/chyok/ollama-gui\n\n"
+                "<Enter>: send\n"
+                "<Shift+Enter>: new line\n"
+                "<Double click dialog>: edit dialog\n")
         messagebox.showinfo("About", info, parent=self.root)
 
     def check_system(self):
@@ -118,7 +119,7 @@ class OllamaInterface:
         self.chat_box.see(tk.END)
         self.chat_box.config(state=tk.DISABLED)
 
-    def on_double_click(self, event, inner_label):
+    def on_double_click(self, _, inner_label):
         if self.editor_window and self.editor_window.winfo_exists():
             self.editor_window.lift()
             return
@@ -201,7 +202,7 @@ class OllamaInterface:
             idx = self.chat_box.index("end-1c").split(".")[0]
             self.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
 
-    def _resize_inner_text_widget(self, event):
+    def resize_inner_text_widget(self, event):
         for i in self.label_widgets:
             current_width = event.widget.winfo_width()
             max_width = int(current_width) * 0.7
@@ -494,10 +495,10 @@ class LayoutManager:
         chat_box.configure(yscrollcommand=scrollbar.set)
 
         chat_box_menu = tk.Menu(chat_box, tearoff=0)
-        chat_box_menu.add_command(label="Copy", command=self.interface.copy_select)
         chat_box_menu.add_command(label="Copy All", command=self.interface.copy_all)
         chat_box_menu.add_separator()
         chat_box_menu.add_command(label="Clear Chat", command=self.interface.clear_chat)
+        chat_box.bind("<Configure>", self.interface.resize_inner_text_widget)
 
         _right_click = (
             "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
@@ -561,7 +562,7 @@ class LayoutManager:
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="Source Code", command=self.interface.open_homepage)
-        help_menu.add_command(label="About", command=self.interface.show_about)
+        help_menu.add_command(label="Help", command=self.interface.show_help)
 
         self.interface.user_input = user_input
         self.interface.send_button = send_button
