@@ -73,7 +73,6 @@ class OllamaInterface:
     model_select: ttk.Combobox
     log_textbox: tk.Text
     models_list: tk.Listbox
-    editor_window: Optional[tk.Toplevel] = None
 
     def __init__(self, root: tk.Tk):
         self.root: tk.Tk = root
@@ -82,18 +81,19 @@ class OllamaInterface:
         self.label_widgets: List[tk.Label] = []
         self.default_font: str = font.nametofont("TkTextFont").actual()["family"]
 
-        LayoutManager(self).init_layout()
+        self.layout = LayoutManager(self)
+        self.layout.init_layout()
 
         self.root.after(200, self.check_system)
         self.refresh_models()
 
-    def _copy_text(self, text):
+    def copy_text(self, text):
         if text:
             self.chat_box.clipboard_clear()
             self.chat_box.clipboard_append(text)
 
     def copy_all(self):
-        self._copy_text(pprint.pformat(self.chat_history))
+        self.copy_text(pprint.pformat(self.chat_history))
 
     @staticmethod
     def open_homepage():
@@ -101,6 +101,7 @@ class OllamaInterface:
 
     def show_help(self):
         info = ("Project: Ollama GUI\n"
+                f"Version: {__version__}\n"
                 "Author: chyok\n"
                 "Github: https://github.com/chyok/ollama-gui\n\n"
                 "<Enter>: send\n"
@@ -113,107 +114,21 @@ class OllamaInterface:
         if message is not None:
             messagebox.showwarning("Warning", message, parent=self.root)
 
-    def append_text_to_chat(self, text, *args):
+    def append_text_to_chat(self, text, *args, use_label: bool = False):
         self.chat_box.config(state=tk.NORMAL)
-        self.chat_box.insert(tk.END, text, *args)
+        if use_label:
+            cur_label_widget = self.label_widgets[-1]
+            cur_label_widget.config(text=cur_label_widget.cget("text") + text)
+        else:
+            self.chat_box.insert(tk.END, text, *args)
         self.chat_box.see(tk.END)
         self.chat_box.config(state=tk.DISABLED)
-
-    def on_double_click(self, _, inner_label):
-        if self.editor_window and self.editor_window.winfo_exists():
-            self.editor_window.lift()
-            return
-
-        editor_window = tk.Toplevel(self.root)
-        editor_window.title("Chat Editor")
-
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = int((screen_width / 2) - (400 / 2))
-        y = int((screen_height / 2) - (300 / 2))
-
-        editor_window.geometry(f"{400}x{300}+{x}+{y}")
-
-        chat_editor = tk.Text(editor_window)
-        chat_editor.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
-        chat_editor.insert(tk.END, inner_label.cget("text"))
-        editor_window.grid_rowconfigure(0, weight=1)
-        editor_window.grid_columnconfigure(0, weight=1)
-        editor_window.grid_columnconfigure(1, weight=1)
-
-        def _save():
-            idx = self.label_widgets.index(inner_label)
-            if len(self.chat_history) > idx:
-                self.chat_history[idx]["content"] = chat_editor.get("1.0", "end-1c")
-                inner_label.config(text=chat_editor.get("1.0", "end-1c"))
-
-            editor_window.destroy()
-
-        save_button = tk.Button(editor_window, text="Save", command=_save)
-        save_button.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-
-        cancel_button = tk.Button(
-            editor_window, text="Cancel", command=editor_window.destroy
-        )
-        cancel_button.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-
-        editor_window.grid_columnconfigure(0, weight=1, uniform="btn")
-        editor_window.grid_columnconfigure(1, weight=1, uniform="btn")
-
-        self.editor_window = editor_window
-
-    def create_inner_label(self, on_right_side: bool = False):
-        background = "#48a4f2" if on_right_side else "#eaeaea"
-        foreground = "white" if on_right_side else "black"
-        max_width = int(self.chat_box.winfo_reqwidth()) * 0.7
-        inner_label = tk.Label(
-            self.chat_box,
-            justify=tk.LEFT,
-            wraplength=max_width,
-            background=background,
-            highlightthickness=0,
-            highlightbackground=background,
-            foreground=foreground,
-            padx=8,
-            pady=8,
-            font=(self.default_font, 12),
-            borderwidth=0,
-        )
-        self.label_widgets.append(inner_label)
-
-        inner_label.bind("<MouseWheel>", self._on_mousewheel)
-        inner_label.bind("<Double-1>", lambda e: self.on_double_click(e, inner_label))
-
-        _right_menu = tk.Menu(inner_label, tearoff=0)
-        _right_menu.add_command(
-            label="Edit", command=lambda: self.on_double_click(None, inner_label)
-        )
-        _right_menu.add_command(
-            label="Copy This", command=lambda: self._copy_text(inner_label.cget("text"))
-        )
-        _right_menu.add_separator()
-        _right_menu.add_command(label="Clear Chat", command=self.clear_chat)
-        _right_click = (
-            "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
-        )
-        inner_label.bind(_right_click, lambda e: _right_menu.post(e.x_root, e.y_root))
-        self.chat_box.window_create(tk.END, window=inner_label)
-        if on_right_side:
-            idx = self.chat_box.index("end-1c").split(".")[0]
-            self.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
 
     def resize_inner_text_widget(self, event):
         for i in self.label_widgets:
             current_width = event.widget.winfo_width()
             max_width = int(current_width) * 0.7
             i.config(wraplength=max_width)
-
-    def append_child_label_to_chat(self, text, *args):
-        self.chat_box.config(state=tk.NORMAL)
-        cur_label_widget = self.label_widgets[-1]
-        cur_label_widget.config(text=cur_label_widget.cget("text") + text)
-        self.chat_box.see(tk.END)
-        self.chat_box.config(state=tk.DISABLED)
 
     def append_log(self, message, delete=False):
         if self.log_textbox.winfo_exists():
@@ -284,15 +199,11 @@ class OllamaInterface:
         self.model_select["values"] = []
         self.send_button.state(["disabled"])
 
-    def _on_mousewheel(self, event):
-        self.chat_box.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
     def on_send_button(self, _=None):
         message = self.user_input.get("1.0", "end-1c")
         if message:
-            self.create_inner_label(on_right_side=True)
-
-            self.append_child_label_to_chat(f"{message}")
+            self.layout.create_inner_label(on_right_side=True)
+            self.append_text_to_chat(f"{message}", use_label=True)
             self.append_text_to_chat(f"\n\n")
             self.user_input.delete("1.0", "end")
             self.chat_history.append({"role": "user", "content": message})
@@ -310,9 +221,9 @@ class OllamaInterface:
         try:
             self.append_text_to_chat(f"{self.model_select.get()}\n", ("Bold",))
             ai_message = ""
-            self.create_inner_label()
+            self.layout.create_inner_label()
             for i in self._request_ollama():
-                self.append_child_label_to_chat(f"{i}")
+                self.append_text_to_chat(f"{i}", use_label=True)
                 ai_message += i
             self.chat_history.append({"role": "assistant", "content": ai_message})
             self.append_text_to_chat("\n\n")
@@ -440,6 +351,7 @@ class LayoutManager:
     def __init__(self, interface: OllamaInterface):
         self.interface: OllamaInterface = interface
         self.management_window: Optional[tk.Toplevel] = None
+        self.editor_window: Optional[tk.Toplevel] = None
 
     def init_layout(self):
         self._header_frame()
@@ -456,7 +368,7 @@ class LayoutManager:
         model_select.grid(row=0, column=0)
 
         settings_button = ttk.Button(
-            header_frame, text="⚙️", command=self.open_model_management_window, width=3
+            header_frame, text="⚙️", command=self.show_model_management_window, width=3
         )
         settings_button.grid(row=0, column=1, padx=(5, 0))
 
@@ -551,7 +463,7 @@ class LayoutManager:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Model Management", command=self.open_model_management_window)
+        file_menu.add_command(label="Model Management", command=self.show_model_management_window)
         file_menu.add_command(label="Exit", command=self.interface.root.quit)
 
         edit_menu = tk.Menu(menubar, tearoff=0)
@@ -567,7 +479,7 @@ class LayoutManager:
         self.interface.user_input = user_input
         self.interface.send_button = send_button
 
-    def open_model_management_window(self):
+    def show_model_management_window(self):
         self.interface.update_host()
 
         if self.management_window and self.management_window.winfo_exists():
@@ -647,6 +559,95 @@ class LayoutManager:
         Thread(
             target=self.interface.update_model_list, daemon=True,
         ).start()
+
+    def show_editor_window(self, _, inner_label):
+        if self.editor_window and self.editor_window.winfo_exists():
+            self.editor_window.lift()
+            return
+
+        editor_window = tk.Toplevel(self.interface.root)
+        editor_window.title("Chat Editor")
+
+        screen_width = self.interface.root.winfo_screenwidth()
+        screen_height = self.interface.root.winfo_screenheight()
+
+        x = int((screen_width / 2) - (400 / 2))
+        y = int((screen_height / 2) - (300 / 2))
+
+        editor_window.geometry(f"{400}x{300}+{x}+{y}")
+
+        chat_editor = tk.Text(editor_window)
+        chat_editor.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        chat_editor.insert(tk.END, inner_label.cget("text"))
+
+        editor_window.grid_rowconfigure(0, weight=1)
+        editor_window.grid_columnconfigure(0, weight=1)
+        editor_window.grid_columnconfigure(1, weight=1)
+
+        def _save():
+            idx = self.interface.label_widgets.index(inner_label)
+            if len(self.interface.chat_history) > idx:
+                self.interface.chat_history[idx]["content"] = chat_editor.get("1.0", "end-1c")
+                inner_label.config(text=chat_editor.get("1.0", "end-1c"))
+
+            editor_window.destroy()
+
+        save_button = tk.Button(editor_window, text="Save", command=_save)
+        save_button.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+
+        cancel_button = tk.Button(
+            editor_window, text="Cancel", command=editor_window.destroy
+        )
+        cancel_button.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+
+        editor_window.grid_columnconfigure(0, weight=1, uniform="btn")
+        editor_window.grid_columnconfigure(1, weight=1, uniform="btn")
+
+        self.editor_window = editor_window
+
+    def create_inner_label(self, on_right_side: bool = False):
+        background = "#48a4f2" if on_right_side else "#eaeaea"
+        foreground = "white" if on_right_side else "black"
+        max_width = int(self.interface.chat_box.winfo_reqwidth()) * 0.7
+        inner_label = tk.Label(
+            self.interface.chat_box,
+            justify=tk.LEFT,
+            wraplength=max_width,
+            background=background,
+            highlightthickness=0,
+            highlightbackground=background,
+            foreground=foreground,
+            padx=8,
+            pady=8,
+            font=(self.interface.default_font, 12),
+            borderwidth=0,
+        )
+        self.interface.label_widgets.append(inner_label)
+
+        inner_label.bind(
+            "<MouseWheel>",
+            lambda e:
+            self.interface.chat_box.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        )
+        inner_label.bind("<Double-1>", lambda e: self.show_editor_window(e, inner_label))
+
+        _right_menu = tk.Menu(inner_label, tearoff=0)
+        _right_menu.add_command(
+            label="Edit", command=lambda: self.show_editor_window(None, inner_label)
+        )
+        _right_menu.add_command(
+            label="Copy This", command=lambda: self.interface.copy_text(inner_label.cget("text"))
+        )
+        _right_menu.add_separator()
+        _right_menu.add_command(label="Clear Chat", command=self.interface.clear_chat)
+        _right_click = (
+            "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
+        )
+        inner_label.bind(_right_click, lambda e: _right_menu.post(e.x_root, e.y_root))
+        self.interface.chat_box.window_create(tk.END, window=inner_label)
+        if on_right_side:
+            idx = self.interface.chat_box.index("end-1c").split(".")[0]
+            self.interface.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
 
 
 def run():
