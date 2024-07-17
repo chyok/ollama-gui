@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 
 from threading import Thread
-from typing import Optional, List
+from typing import Optional, List, Generator
 
 try:
     import tkinter as tk
@@ -87,7 +87,7 @@ class OllamaInterface:
         self.root.after(200, self.check_system)
         self.refresh_models()
 
-    def copy_text(self, text):
+    def copy_text(self, text: str):
         if text:
             self.chat_box.clipboard_clear()
             self.chat_box.clipboard_append(text)
@@ -114,7 +114,10 @@ class OllamaInterface:
         if message is not None:
             messagebox.showwarning("Warning", message, parent=self.root)
 
-    def append_text_to_chat(self, text, *args, use_label: bool = False):
+    def append_text_to_chat(self,
+                            text: str,
+                            *args,
+                            use_label: bool = False):
         self.chat_box.config(state=tk.NORMAL)
         if use_label:
             cur_label_widget = self.label_widgets[-1]
@@ -124,21 +127,29 @@ class OllamaInterface:
         self.chat_box.see(tk.END)
         self.chat_box.config(state=tk.DISABLED)
 
-    def resize_inner_text_widget(self, event):
+    def append_log_to_inner_textbox(self,
+                                    message: Optional[str] = None,
+                                    clear: bool = False):
+        if self.log_textbox.winfo_exists():
+            self.log_textbox.config(state=tk.NORMAL)
+            if clear:
+                self.log_textbox.delete(1.0, tk.END)
+            elif message:
+                self.log_textbox.insert(tk.END, message + "\n")
+            self.log_textbox.config(state=tk.DISABLED)
+            self.log_textbox.see(tk.END)
+
+    def resize_inner_text_widget(self, event: tk.Event):
         for i in self.label_widgets:
             current_width = event.widget.winfo_width()
             max_width = int(current_width) * 0.7
             i.config(wraplength=max_width)
 
-    def append_log(self, message, delete=False):
-        if self.log_textbox.winfo_exists():
-            self.log_textbox.config(state=tk.NORMAL)
-            if delete:
-                self.log_textbox.delete(1.0, tk.END)
-            else:
-                self.log_textbox.insert(tk.END, message + "\n")
-            self.log_textbox.config(state=tk.DISABLED)
-            self.log_textbox.see(tk.END)
+    def show_error(self, text):
+        self.model_select.set(text)
+        self.model_select.config(foreground="red")
+        self.model_select["values"] = []
+        self.send_button.state(["disabled"])
 
     def show_process_bar(self):
         self.progress.grid(row=0, column=0, sticky="nsew")
@@ -150,7 +161,7 @@ class OllamaInterface:
         self.stop_button.grid_remove()
         self.progress.grid_remove()
 
-    def handle_key_press(self, event):
+    def handle_key_press(self, event: tk.Event):
         if event.keysym == "Return":
             if event.state & 0x1 == 0x1:  # Shift key is pressed
                 self.user_input.insert("end", "\n")
@@ -191,13 +202,7 @@ class OllamaInterface:
                 for model in models:
                     self.models_list.insert(tk.END, model)
             except Exception:  # noqa
-                self.append_log("Error! Please check the Ollama host.")
-
-    def show_error(self, text):
-        self.model_select.set(text)
-        self.model_select.config(foreground="red")
-        self.model_select["values"] = []
-        self.send_button.state(["disabled"])
+                self.append_log_to_inner_textbox("Error! Please check the Ollama host.")
 
     def on_send_button(self, _=None):
         message = self.user_input.get("1.0", "end-1c")
@@ -222,7 +227,7 @@ class OllamaInterface:
             self.append_text_to_chat(f"{self.model_select.get()}\n", ("Bold",))
             ai_message = ""
             self.layout.create_inner_label()
-            for i in self._request_ollama():
+            for i in self.fetch_chat_stream_result():
                 self.append_text_to_chat(f"{i}", use_label=True)
                 ai_message += i
             self.chat_history.append({"role": "assistant", "content": ai_message})
@@ -243,7 +248,7 @@ class OllamaInterface:
             models = [model["name"] for model in data["models"]]
             return models
 
-    def _request_ollama(self):
+    def fetch_chat_stream_result(self) -> Generator:
         request = urllib.request.Request(
             urllib.parse.urljoin(self.api_url, "/api/chat"),
             data=json.dumps(
@@ -266,8 +271,8 @@ class OllamaInterface:
                     time.sleep(0.01)
                     yield data["message"]["content"]
 
-    def delete_model(self, model_name):
-        self.append_log("", delete=True)
+    def delete_model(self, model_name: str):
+        self.append_log_to_inner_textbox(clear=True)
         if not model_name:
             return
 
@@ -279,17 +284,17 @@ class OllamaInterface:
         try:
             with urllib.request.urlopen(req) as response:
                 if response.status == 200:
-                    self.append_log("Model deleted successfully.")
+                    self.append_log_to_inner_textbox("Model deleted successfully.")
                 elif response.status == 404:
-                    self.append_log("Model not found.")
+                    self.append_log_to_inner_textbox("Model not found.")
         except Exception as e:
-            self.append_log(f"Failed to delete model: {e}")
+            self.append_log_to_inner_textbox(f"Failed to delete model: {e}")
         finally:
             self.update_model_list()
             self.update_model_select()
 
-    def download_model(self, model_name, insecure=False):
-        self.append_log("", delete=True)
+    def download_model(self, model_name: str, insecure: bool = False):
+        self.append_log_to_inner_textbox(clear=True)
         if not model_name:
             return
 
@@ -306,21 +311,15 @@ class OllamaInterface:
             with urllib.request.urlopen(req) as response:
                 for line in response:
                     data = json.loads(line.decode("utf-8"))
-                    if data.get("error"):
-                        log = data["error"]
-                    elif data.get("status"):
-                        log = data["status"]
-                        if data.get("total") and data.get("completed"):
-                            log += f" [{data['completed']}/{data['total']}]"
-                        elif data.get("total"):
-                            log += f" [0/{data['total']}]"
-
-                    else:
-                        log = "no response"
-                    self.append_log(log)
-
+                    log = data.get("error") or data.get("status") or "No response"
+                    if "status" in data:
+                        total = data.get("total")
+                        completed = data.get("completed", 0)
+                        if total:
+                            log += f" [{completed}/{total}]"
+                    self.append_log_to_inner_textbox(log)
         except Exception as e:
-            self.append_log(f"Failed to download model: {e}")
+            self.append_log_to_inner_textbox(f"Failed to download model: {e}")
         finally:
             self.update_model_list()
             self.update_model_select()
