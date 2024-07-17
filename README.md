@@ -20,9 +20,9 @@ Provide you with the simplest possible visual Ollama interface.
 + 📋 Menu bar and right-click menu.
 + 🛑 Stop generating at any time.
 ### v1.2.0
-+ 🗂️ Model Management: Download and Delete Models
-+ 🎨 UI Enhancement: Bubble dialog theme
-+ 📝 Editable Conversation History
++ 🗂️ Model Management: Download and Delete Models.
++ 🎨 UI Enhancement: Bubble dialog theme.
++ 📝 Editable Conversation History.
 
 ## 📎 Before Start
 
