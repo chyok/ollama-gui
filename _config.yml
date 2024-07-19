@@ -1,0 +1,16 @@
+title: Ollama GUI
+email: chyok@hotmail.com
+description: 
+  A very simple ollama GUI, implemented using the built-in Python Tkinter library, 
+  with no additional dependencies. 
+  Provide you with the simplest possible visual Ollama interface.
+remote_theme: pages-themes/midnight@v0.2.0
+repository: chyok/ollama-gui
+plugins:
+  - jekyll-feed
+  - jekyll-remote-theme
+
+github:
+  release_url: https://github.com/chyok/ollama-gui/releases
+
+show_downloads: true
