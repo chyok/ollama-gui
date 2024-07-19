@@ -76,6 +76,7 @@ For other Python versions, installing Tcl/Tk 8.6.13+ separately (e.g., via Homeb
 
 Here is the issue: https://github.com/python/cpython/issues/110218
 
+------
 
 ### ImportError: No module named 'Tkinter'
 
