@@ -24,7 +24,7 @@ layout: default
 
 ## 📎 Before Start
 
-We need to set up llama service first.
+We need to set up Ollama service first.
 
 Please refer to:   
 + [Ollama](https://ollama.com/)  
