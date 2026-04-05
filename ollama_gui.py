@@ -233,7 +233,7 @@ class OllamaInterface:
             self.chat_history.append({"role": "assistant", "content": ai_message})
             self.append_text_to_chat("\n\n")
         except Exception:  # noqa
-            self.append_text_to_chat(tk.END, f"\nAI error!\n\n", ("Error",))
+            self.append_text_to_chat("\nAI error!\n\n", ("Error",))
         finally:
             self.hide_process_bar()
             self.send_button.state(["!disabled"])
