@@ -67,12 +67,14 @@ class OllamaInterface:
     progress: ttk.Progressbar
     stop_button: ttk.Button
     send_button: ttk.Button
+    system_button: ttk.Button
     refresh_button: ttk.Button
     download_button: ttk.Button
     delete_button: ttk.Button
     model_select: ttk.Combobox
     log_textbox: tk.Text
     models_list: tk.Listbox
+    think_var: tk.BooleanVar
 
     def __init__(self, root: tk.Tk):
         self.root: tk.Tk = root
@@ -80,6 +82,7 @@ class OllamaInterface:
         self.chat_history: List[dict] = []
         self.label_widgets: List[tk.Label] = []
         self.default_font: str = font.nametofont("TkTextFont").actual()["family"]
+        self.think_var = tk.BooleanVar(value=True)
 
         self.layout = LayoutManager(self)
         self.layout.init_layout()
@@ -174,6 +177,7 @@ class OllamaInterface:
         self.model_select.config(foreground="black")
         self.model_select.set("Waiting...")
         self.send_button.state(["disabled"])
+        self.system_button.state(["disabled"])
         self.refresh_button.state(["disabled"])
         Thread(target=self.update_model_select, daemon=True).start()
 
@@ -187,6 +191,7 @@ class OllamaInterface:
             if models:
                 self.model_select.set(models[0])
                 self.send_button.state(["!disabled"])
+                self.system_button.state(["!disabled"])
             else:
                 self.show_error("You need download a model!")
         except Exception:  # noqa
@@ -205,6 +210,7 @@ class OllamaInterface:
                 self.append_log_to_inner_textbox("Error! Please check the Ollama host.")
 
     def on_send_button(self, _=None):
+        self.system_button.state(["disabled"])
         message = self.user_input.get("1.0", "end-1c")
         if message:
             self.layout.create_inner_label(on_right_side=True)
@@ -217,6 +223,15 @@ class OllamaInterface:
                 target=self.generate_ai_response,
                 daemon=True,
             ).start()
+
+    def on_system_button(self, _=None):
+        message = self.user_input.get("1.0", "end-1c")
+        if message:
+            self.layout.create_inner_label(on_right_side=True)
+            self.append_text_to_chat(f"*** System ***: {message}", use_label=True)
+            self.append_text_to_chat(f"\n\n")
+            self.user_input.delete("1.0", "end")
+            self.chat_history.append({"role": "system", "content": message})
 
     def generate_ai_response(self):
         self.show_process_bar()
@@ -256,6 +271,7 @@ class OllamaInterface:
                     "model": self.model_select.get(),
                     "messages": self.chat_history,
                     "stream": True,
+                    **({"think": True} if self.think_var.get() else {})
                 }
             ).encode("utf-8"),
             headers={"Content-Type": "application/json"},
@@ -334,6 +350,7 @@ class OllamaInterface:
         self.chat_box.delete(1.0, tk.END)
         self.chat_box.config(state=tk.DISABLED)
         self.chat_history.clear()
+        self.system_button.state(["!disabled"])
 
     def save_chat(self):
         filepath = filedialog.asksaveasfilename(
@@ -490,13 +507,31 @@ class LayoutManager:
         user_input.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         user_input.bind("<Key>", self.interface.handle_key_press)
 
+        send_frame = ttk.Frame(input_frame)
+        send_frame.grid(row=0, column=1, rowspan=2, padx=(0, 5), sticky="ns")
+        
+        think_checkbox = ttk.Checkbutton(
+            send_frame,
+            text="Think",
+            variable=self.interface.think_var
+        )
+        think_checkbox.pack(side="top", pady=(0, 2))
+        
         send_button = ttk.Button(
-            input_frame,
+            send_frame,
             text="Send",
             command=self.interface.on_send_button,
         )
-        send_button.grid(row=0, column=1)
+        send_button.pack(side="top")
         send_button.state(["disabled"])
+
+        system_button = ttk.Button(
+            send_frame,
+            text="System",
+            command=self.interface.on_system_button,
+        )
+        system_button.pack(side="top")
+        system_button.state(["disabled"])
 
         menubar = tk.Menu(self.interface.root)
         self.interface.root.config(menu=menubar)
@@ -522,6 +557,7 @@ class LayoutManager:
 
         self.interface.user_input = user_input
         self.interface.send_button = send_button
+        self.interface.system_button = system_button
 
     def show_model_management_window(self):
         self.interface.update_host()
