@@ -24,6 +24,14 @@ except (ModuleNotFoundError, ImportError):
 __version__ = "1.2.2"
 
 
+def _version_tuple(v: str) -> tuple:
+    """A lazy way to avoid importing third-party libraries"""
+    filled = []
+    for point in v.split("."):
+        filled.append(point.zfill(8))
+    return tuple(filled)
+
+
 def _system_check(root: tk.Tk) -> Optional[str]:
     """
     Detected some system and software compatibility issues,
@@ -33,17 +41,11 @@ def _system_check(root: tk.Tk) -> Optional[str]:
     :return: None or message string
     """
 
-    def _version_tuple(v):
-        """A lazy way to avoid importing third-party libraries"""
-        filled = []
-        for point in v.split("."):
-            filled.append(point.zfill(8))
-        return tuple(filled)
-
     # Tcl and macOS issue: https://github.com/python/cpython/issues/110218
     if platform.system().lower() == "darwin":
+        # mac_ver may return "14", "14.4" or "14.4.1", so it can't be parsed as a float
         version = platform.mac_ver()[0]
-        if version and 14 <= float(version) < 15:
+        if version and _version_tuple("14") <= _version_tuple(version) < _version_tuple("15"):
             tcl_version = root.tk.call("info", "patchlevel")
             if _version_tuple(tcl_version) <= _version_tuple("8.6.12"):
                 return (
