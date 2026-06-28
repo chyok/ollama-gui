@@ -1,6 +1,7 @@
 import sys
 import json
 import time
+import queue
 import pprint
 import platform
 import webbrowser
@@ -8,7 +9,7 @@ import webbrowser
 import urllib.parse
 import urllib.request
 
-from threading import Thread
+from threading import Thread, Event
 from typing import Optional, List, Generator
 
 try:
@@ -22,6 +23,8 @@ except (ModuleNotFoundError, ImportError):
     sys.exit(0)
 
 __version__ = "1.2.2"
+
+UI_POLL_INTERVAL = 20  # ms
 
 
 def _version_tuple(v: str) -> tuple:
@@ -81,13 +84,38 @@ class OllamaInterface:
         self.api_url: str = "http://127.0.0.1:11434"
         self.chat_history: List[dict] = []
         self.label_widgets: List[tk.Label] = []
+        self.ai_label: Optional[tk.Label] = None
+        self.ui_queue: queue.Queue = queue.Queue()
+        self.stop_event: Event = Event()
         self.default_font: str = font.nametofont("TkTextFont").actual()["family"]
 
         self.layout = LayoutManager(self)
         self.layout.init_layout()
 
         self.root.after(200, self.check_system)
+        self.root.after(UI_POLL_INTERVAL, self.process_ui_queue)
         self.refresh_models()
+
+    def run_on_ui(self, func, *args, **kwargs):
+        """
+        Tkinter is not thread-safe, so the worker threads never touch
+        the widgets, they queue the call and the main thread runs it.
+        """
+        self.ui_queue.put((func, args, kwargs))
+
+    def drain_ui_queue(self):
+        for _ in range(self.ui_queue.qsize()):
+            try:
+                func, args, kwargs = self.ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            func(*args, **kwargs)
+
+    def process_ui_queue(self):
+        try:
+            self.drain_ui_queue()
+        finally:
+            self.root.after(UI_POLL_INTERVAL, self.process_ui_queue)
 
     def copy_text(self, text: str):
         if text:
@@ -183,28 +211,46 @@ class OllamaInterface:
         self.api_url = self.host_input.get()
 
     def update_model_select(self):
+        """Worker thread: fetch the models, the widgets are updated by the main thread"""
         try:
             models = self.fetch_models()
-            self.model_select["values"] = models
-            if models:
+        except Exception:  # noqa
+            models = None
+        self.run_on_ui(self.set_model_select, models)
+
+    def set_model_select(self, models: Optional[List[str]]):
+        try:
+            if models is None:
+                self.show_error("Error! Please check the host.")
+            elif models:
+                self.model_select["values"] = models
                 self.model_select.set(models[0])
                 self.send_button.state(["!disabled"])
             else:
                 self.show_error("You need download a model!")
-        except Exception:  # noqa
-            self.show_error("Error! Please check the host.")
         finally:
             self.refresh_button.state(["!disabled"])
 
     def update_model_list(self):
+        """Worker thread: fetch the models, the widgets are updated by the main thread"""
+        try:
+            models = self.fetch_models()
+        except Exception:  # noqa
+            models = None
+        self.run_on_ui(self.set_model_list, models)
+
+    def set_model_list(self, models: Optional[List[str]]):
         if self.models_list.winfo_exists():
             self.models_list.delete(0, tk.END)
-            try:
-                models = self.fetch_models()
+            if models is None:
+                self.append_log_to_inner_textbox("Error! Please check the Ollama host.")
+            else:
                 for model in models:
                     self.models_list.insert(tk.END, model)
-            except Exception:  # noqa
-                self.append_log_to_inner_textbox("Error! Please check the Ollama host.")
+
+    def set_download_button_state(self, state: str):
+        if self.download_button.winfo_exists():
+            self.download_button.state([state])
 
     def on_send_button(self, _=None):
         message = self.user_input.get("1.0", "end-1c")
@@ -215,28 +261,53 @@ class OllamaInterface:
             self.user_input.delete("1.0", "end")
             self.chat_history.append({"role": "user", "content": message})
 
+            self.show_process_bar()
+            self.send_button.state(["disabled"])
+            self.refresh_button.state(["disabled"])
+
+            model = self.model_select.get()
+            self.append_text_to_chat(f"{model}\n", ("Bold",))
+            self.ai_label = self.layout.create_inner_label()
+            self.stop_event = Event()
+
             Thread(
                 target=self.generate_ai_response,
+                args=(model, list(self.chat_history), self.stop_event),
                 daemon=True,
             ).start()
 
-    def generate_ai_response(self):
-        self.show_process_bar()
-        self.send_button.state(["disabled"])
-        self.refresh_button.state(["disabled"])
+    def on_stop_button(self):
+        self.stop_event.set()
+        self.stop_button.state(["disabled"])
 
+    def generate_ai_response(self, model: str, messages: List[dict], stop_event: Event):
+        """Worker thread: read the stream, the widgets are updated by the main thread"""
+        ai_message = ""
+        error = False
         try:
-            self.append_text_to_chat(f"{self.model_select.get()}\n", ("Bold",))
-            ai_message = ""
-            self.layout.create_inner_label()
-            for i in self.fetch_chat_stream_result():
-                self.append_text_to_chat(f"{i}", use_label=True)
+            for i in self.fetch_chat_stream_result(model, messages, stop_event):
+                self.run_on_ui(self.append_ai_text, i)
                 ai_message += i
-            self.chat_history.append({"role": "assistant", "content": ai_message})
-            self.append_text_to_chat("\n\n")
         except Exception:  # noqa
-            self.append_text_to_chat("\nAI error!\n\n", ("Error",))
+            error = True
         finally:
+            self.run_on_ui(self.finish_ai_response, ai_message, error)
+
+    def append_ai_text(self, text: str):
+        # the label is gone if the chat was cleared while generating
+        if self.ai_label in self.label_widgets:
+            self.append_text_to_chat(text, use_label=True)
+
+    def finish_ai_response(self, ai_message: str, error: bool = False):
+        try:
+            if self.ai_label in self.label_widgets:
+                if error:
+                    self.append_text_to_chat("\nAI error!\n\n", ("Error",))
+                else:
+                    self.chat_history.append({"role": "assistant", "content": ai_message})
+                    self.append_text_to_chat("\n\n")
+        finally:
+            self.ai_label = None
             self.hide_process_bar()
             self.send_button.state(["!disabled"])
             self.refresh_button.state(["!disabled"])
@@ -250,13 +321,16 @@ class OllamaInterface:
             models = [model["name"] for model in data["models"]]
             return models
 
-    def fetch_chat_stream_result(self) -> Generator:
+    def fetch_chat_stream_result(self,
+                                 model: str,
+                                 messages: List[dict],
+                                 stop_event: Event) -> Generator:
         request = urllib.request.Request(
             urllib.parse.urljoin(self.api_url, "/api/chat"),
             data=json.dumps(
                 {
-                    "model": self.model_select.get(),
-                    "messages": self.chat_history,
+                    "model": model,
+                    "messages": messages,
                     "stream": True,
                 }
             ).encode("utf-8"),
@@ -266,7 +340,7 @@ class OllamaInterface:
 
         with urllib.request.urlopen(request) as resp:
             for line in resp:
-                if "disabled" in self.stop_button.state():  # stop
+                if stop_event.is_set():  # stop
                     break
                 data = json.loads(line.decode("utf-8"))
                 if "message" in data:
@@ -274,7 +348,7 @@ class OllamaInterface:
                     yield data["message"]["content"]
 
     def delete_model(self, model_name: str):
-        self.append_log_to_inner_textbox(clear=True)
+        self.run_on_ui(self.append_log_to_inner_textbox, clear=True)
         if not model_name:
             return
 
@@ -286,21 +360,21 @@ class OllamaInterface:
         try:
             with urllib.request.urlopen(req) as response:
                 if response.status == 200:
-                    self.append_log_to_inner_textbox("Model deleted successfully.")
+                    self.run_on_ui(self.append_log_to_inner_textbox, "Model deleted successfully.")
                 elif response.status == 404:
-                    self.append_log_to_inner_textbox("Model not found.")
+                    self.run_on_ui(self.append_log_to_inner_textbox, "Model not found.")
         except Exception as e:
-            self.append_log_to_inner_textbox(f"Failed to delete model: {e}")
+            self.run_on_ui(self.append_log_to_inner_textbox, f"Failed to delete model: {e}")
         finally:
             self.update_model_list()
             self.update_model_select()
 
     def download_model(self, model_name: str, insecure: bool = False):
-        self.append_log_to_inner_textbox(clear=True)
+        self.run_on_ui(self.append_log_to_inner_textbox, clear=True)
         if not model_name:
             return
 
-        self.download_button.state(["disabled"])
+        self.run_on_ui(self.set_download_button_state, "disabled")
 
         req = urllib.request.Request(
             urllib.parse.urljoin(self.api_url, "/api/pull"),
@@ -319,16 +393,16 @@ class OllamaInterface:
                         completed = data.get("completed", 0)
                         if total:
                             log += f" [{completed}/{total}]"
-                    self.append_log_to_inner_textbox(log)
+                    self.run_on_ui(self.append_log_to_inner_textbox, log)
         except Exception as e:
-            self.append_log_to_inner_textbox(f"Failed to download model: {e}")
+            self.run_on_ui(self.append_log_to_inner_textbox, f"Failed to download model: {e}")
         finally:
             self.update_model_list()
             self.update_model_select()
-            if self.download_button.winfo_exists():
-                self.download_button.state(["!disabled"])
+            self.run_on_ui(self.set_download_button_state, "!disabled")
 
     def clear_chat(self):
+        self.stop_event.set()
         for i in self.label_widgets:
             i.destroy()
         self.label_widgets.clear()
@@ -475,7 +549,7 @@ class LayoutManager:
             process_frame,
             width=5,
             text="Stop",
-            command=lambda: stop_button.state(["disabled"]),
+            command=self.interface.on_stop_button,
         )
 
         self.interface.progress = progress
@@ -651,7 +725,7 @@ class LayoutManager:
 
         self.editor_window = editor_window
 
-    def create_inner_label(self, on_right_side: bool = False):
+    def create_inner_label(self, on_right_side: bool = False) -> tk.Label:
         background = "#48a4f2" if on_right_side else "#eaeaea"
         foreground = "white" if on_right_side else "black"
         max_width = int(self.interface.chat_box.winfo_reqwidth()) * 0.7
@@ -694,6 +768,7 @@ class LayoutManager:
         if on_right_side:
             idx = self.interface.chat_box.index("end-1c").split(".")[0]
             self.interface.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
+        return inner_label
 
 
 def run():
