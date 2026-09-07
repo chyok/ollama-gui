@@ -1,0 +1,14 @@
+include LICENSE
+include README.md
+include INSTALL.md
+include RELEASE.md
+include pyproject.toml
+include ollama_speak.py
+
+recursive-include tests *.py
+recursive-include legacy *
+
+prune build
+prune dist
+global-exclude __pycache__
+global-exclude *.py[cod]

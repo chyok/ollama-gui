@@ -1,0 +1,13 @@
+Package: ollama-speak
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: Dr. Eric O. Flores <eric@florestoro.com>
+Depends: python3 (>= 3.10), python3-tk, alsa-utils
+Recommends: sox
+Homepage: https://github.com/drericflores/ollama-speak
+Description: Local Ollama chat client with offline multilingual speech
+ Ollama Speak is a Tk desktop client for local Ollama models. It supports
+ streaming conversations and optional multilingual speech through separately
+ installed Piper voices. Piper, Ollama, and voice models are not bundled.

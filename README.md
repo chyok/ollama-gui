@@ -1,114 +1,105 @@
-# Ollama-GUI
+# Ollama Speak
 
-![GitHub License](https://img.shields.io/github/license/chyok/ollama-gui)
-![PyPI - Version](https://img.shields.io/pypi/v/ollama-gui)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ollama-gui)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
-A very simple ollama GUI, implemented using the built-in Python Tkinter library, with no additional dependencies.
-Provide you with the simplest possible visual Ollama interface.
+Ollama Speak is a local-first Linux desktop client for Ollama with multilingual
+offline speech powered by Piper. It provides a lightweight Tk interface,
+streaming chat, conversation management, completion-model filtering, and
+sentence-synchronized speech without cloud TTS.
 
-![ollama-gui-1 2 0](https://github.com/user-attachments/assets/a4bb979b-68a4-4062-b484-7542f2a866e0)
+The maintained application is `ollama_speak.py`. Earlier implementations are
+preserved under [`legacy/`](legacy/) for attribution and historical reference,
+but are not installed by the Python package.
 
+## Features
 
-## 🚀 Features
-### v1.1.0
-+ 📁 One file project.
-+ 📦 No external dependencies, only **tkinter** which is usually bundled.
-+ 🔍 Auto check ollama model list.
-+ 🌐 Customizable ollama host support.
-+ 💬 Multiple conversations.
-+ 📋 Menu bar and right-click menu.
-+ 🛑 Stop generating at any time.
-### v1.2.0
-+ 🗂️ Model Management: Download and Delete Models.
-+ 🎨 UI Enhancement: Bubble dialog theme.
-+ 📝 Editable Conversation History.
-### v1.2.2 
-+ 💾 Save and Load Conversation History.
+- Discovers chat/completion models and excludes embedding-only models
+- Streams responses while keeping Tk updates on the GUI thread
+- Stops generation and queued speech cleanly
+- Discovers complete Piper `.onnx` and `.onnx.json` voice pairs
+- Supports multilingual installed Piper voices
+- Reads the correct sample rate from each voice configuration
+- Provides Normal, Tenor, and Bright Tenor timbre presets
+- Persists host, model, voice, and timbre in a mode-`0600` settings file
+- Uses only the Python standard library at runtime
 
-## 📎 Before Start
+## Runtime components
 
-We need to set up Ollama service first.
+| Component | Purpose | Requirement |
+|---|---|---|
+| Python 3.10+ and Tk | Application and desktop interface | Required |
+| Ollama | Model discovery and chat generation | Required |
+| Piper | Offline speech synthesis | Required for speech |
+| `aplay` (`alsa-utils`) | ALSA playback | Required for speech |
+| SoX | Timbre/pitch processing | Required only for Tenor presets |
+| Piper voice pair | Voice model and metadata | Required for speech |
 
-Please refer to:   
-+ [Ollama](https://ollama.com/)  
-+ [Ollama Github](https://github.com/ollama/ollama)
+The wheel intentionally does not bundle Ollama, Piper, audio tools, or voices.
 
-## ⚙️ Run
+## Quick start
 
-Choose any way you like:
-> **Note: If you are using a Mac and the system version is Sonoma, please refer to the Q&A at the bottom.**
+On Pop!_OS or Ubuntu:
 
-### source code
-
-```
-python ollama_gui.py
-```
-
-### using pip
-
-```
-pip install ollama-gui
-ollama-gui
+```bash
+sudo apt update
+sudo apt install --yes python3-tk alsa-utils sox pipx
+pipx install piper-tts
 ```
 
-### binary file
+Build and install Ollama Speak:
 
-| Platform | Download Link                                            | 
-|----------|----------------------------------------------------------|
-| Windows  | [Download](https://github.com/chyok/ollama-gui/releases) |
-| Mac (Apple Silicon)  | [Download](https://github.com/chyok/ollama-gui/releases) |
-| Linux  | [Download](https://github.com/chyok/ollama-gui/releases) |
-
-## 📋 Q&A
-### I'm using a Mac, why does the application sometimes not respond when I click on it?
-
-The issue affects macOS Sonoma users running applications that use Tcl/Tk versions 8.6.12 or older, including various Python versions.  
-When the mouse cursor is inside the Tkinter window during startup, GUI elements become unresponsive to clicks.
-
-Solution:  
-Update to Tcl/Tk version 8.6.13 or newer, which fixes this problem.   
-  
-For Python users, this can be done by:  
-Using Python 3.11.7 or later, which bundles the fixed Tcl/Tk version.  
-Using Python 3.12 or later, which already includes the fix.  
-https://www.python.org/downloads/macos/
-
-For other Python versions, installing Tcl/Tk 8.6.13+ separately (e.g., via Homebrew) and ensuring Python uses this version.
-
-Here is the issue: https://github.com/python/cpython/issues/110218
-
-------
-
-### ImportError: No module named 'Tkinter'
-
-This probably happens because the Tk library is not installed.
-
-For Ubuntu or other distros with Apt:
-
-```
-sudo apt-get install python3-tk
+```bash
+mkdir -p build/wheels
+python3 -m pip wheel --no-deps --no-build-isolation \
+  --wheel-dir build/wheels .
+pipx install --force build/wheels/ollama_speak-1.4.0-py3-none-any.whl
+ollama-speak
 ```
 
-For Fedora:
+See [INSTALL.md](INSTALL.md) for Ollama verification, voice downloads, custom
+voice directories, troubleshooting, and removal.
 
+## Development qualification
+
+```bash
+python3 -m py_compile ollama_speak.py tests/test_ollama_speak.py
+python3 -m unittest discover -s tests -v
+python3 -m pip wheel --no-deps --no-build-isolation \
+  --wheel-dir build/wheels .
 ```
-sudo dnf install python3-tkinter
+
+The wheel contains the maintained module, metadata, console entry point, and
+MIT license. Tests, legacy sources, settings, build artifacts, Piper binaries,
+and voices are excluded.
+
+## Configuration
+
+Preferences are stored at:
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/ollama-speak/config.json
 ```
 
-For macOS:
+Add another voice directory without changing source:
 
+```bash
+export OLLAMA_SPEAK_VOICE_DIR=/path/to/piper/voices
+ollama-speak
 ```
-brew install python-tk
-```
 
-For Windows:
+## Privacy and licensing
 
-make sure to **check in the Python install the optional feature "tcl/tk and IDLE"**.  
+Chat traffic stays between the application and the configured Ollama host.
+Speech is synthesized locally. Ollama Speak adds no telemetry or cloud service.
 
-Refer to: https://stackoverflow.com/questions/25905540/importerror-no-module-named-tkinter
+Ollama Speak uses the MIT License. Piper and Piper voice models are separate
+works with their own licenses; review them before redistribution.
 
-## License
+## Credits
 
-This project is licensed under the [MIT License](LICENSE).
+- Original Ollama GUI project: **chyok**
+- Consolidation, reliability work, and speech integration:
+  **Dr. Eric O. Flores**
 
+See [LICENSE](LICENSE) for the full license text.

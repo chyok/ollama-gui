@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Ollama Speak
+GenericName=Local AI Chat Client
+Comment=Chat with local Ollama models using multilingual offline speech
+Exec=ollama-speak
+TryExec=ollama-speak
+Icon=ollama-speak
+Terminal=false
+Categories=Utility;
+Keywords=Ollama;AI;Chat;Speech;Piper;TTS;
+StartupNotify=true
+

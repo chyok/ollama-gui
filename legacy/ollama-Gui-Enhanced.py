@@ -1,0 +1,873 @@
+import sys
+import json
+import time
+import pprint
+import platform
+import webbrowser
+import datetime
+
+import urllib.parse
+import urllib.request
+import urllib.error
+
+from threading import Thread, Event
+from typing import Optional, List, Generator, Callable, Any, Dict
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, font, messagebox, filedialog
+
+except (ModuleNotFoundError, ImportError):
+    print(
+        "Your Python installation does not include the Tk library. \n"
+        "Please refer to https://github.com/chyok/ollama-gui?tab=readme-ov-file#-qa"
+    )
+    sys.exit(0)
+
+__version__ = "1.2.2"
+__revision_date__ = "February 9, 2026"  # Today's date per user timezone (America/Chihuahua)
+
+
+def _system_check(root: tk.Tk) -> Optional[str]:
+    """
+    Detected some system and software compatibility issues,
+    and returned the information in the form of a string to alert the user
+
+    :param root: Tk instance
+    :return: None or message string
+    """
+
+    def _version_tuple(v):
+        """A lazy way to avoid importing third-party libraries"""
+        filled = []
+        for point in v.split("."):
+            filled.append(point.zfill(8))
+        return tuple(filled)
+
+    # Tcl and macOS issue: https://github.com/python/cpython/issues/110218
+    if platform.system().lower() == "darwin":
+        version = platform.mac_ver()[0]
+        if version and 14 <= float(version) < 15:
+            tcl_version = root.tk.call("info", "patchlevel")
+            if _version_tuple(tcl_version) <= _version_tuple("8.6.12"):
+                return (
+                    "Warning: Tkinter Responsiveness Issue Detected\n\n"
+                    "You may experience unresponsive GUI elements when "
+                    "your cursor is inside the window during startup. "
+                    "This is a known issue with Tcl/Tk versions 8.6.12 "
+                    "and older on macOS Sonoma.\n\nTo resolve this:\n"
+                    "Update to Python 3.11.7+ or 3.12+\n"
+                    "Or install Tcl/Tk 8.6.13 or newer separately\n\n"
+                    "Temporary workaround: Move your cursor out of "
+                    "the window and back in if elements become unresponsive.\n\n"
+                    "For more information, visit: https://github.com/python/cpython/issues/110218"
+                )
+    return None
+
+
+class OllamaInterface:
+    chat_box: tk.Text
+    user_input: tk.Text
+    host_input: ttk.Entry
+    progress: ttk.Progressbar
+    stop_button: ttk.Button
+    send_button: ttk.Button
+    refresh_button: ttk.Button
+    download_button: ttk.Button
+    delete_button: ttk.Button
+    model_select: ttk.Combobox
+    log_textbox: tk.Text
+    models_list: tk.Listbox
+
+    def __init__(self, root: tk.Tk):
+        self.root: tk.Tk = root
+        self.api_url: str = "http://127.0.0.1:11434"
+        self.chat_history: List[dict] = []
+        self.label_widgets: List[tk.Label] = []
+        self.default_font: str = font.nametofont("TkTextFont").actual()["family"]
+
+        # Fix #1: Tkinter UI thread-safety helpers
+        self._ui_alive: bool = True
+
+        # Fix #2: Proper cancellation + timeouts
+        self.stop_event: Event = Event()
+        self.net_timeout: int = 30  # seconds; prevents hanging reads/connects
+
+        self.layout = LayoutManager(self)
+        self.layout.init_layout()
+
+        # Ensure we don't leave background threads trying to touch UI after exit
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.root.after(200, self.check_system)
+        self.refresh_models()
+
+    # =========================
+    # Fix #1: UI thread helpers
+    # =========================
+    def ui(self, fn: Callable[..., Any], *args, **kwargs) -> None:
+        """
+        Schedule a UI operation on the Tk main thread.
+        """
+        if not self._ui_alive:
+            return
+        try:
+            self.root.after(0, lambda: fn(*args, **kwargs))
+        except Exception:
+            pass
+
+    def ui_sync(self, fn: Callable[..., Any], *args, **kwargs) -> Any:
+        """
+        Run a UI operation on the Tk main thread and wait until it's completed.
+        """
+        done = Event()
+        result: Dict[str, Any] = {}
+
+        def _runner():
+            try:
+                result["value"] = fn(*args, **kwargs)
+            except Exception as e:
+                result["error"] = e
+            finally:
+                done.set()
+
+        if not self._ui_alive:
+            return None
+
+        try:
+            self.root.after(0, _runner)
+            done.wait()
+        except Exception:
+            return None
+
+        if "error" in result:
+            raise result["error"]
+        return result.get("value")
+
+    def on_close(self):
+        # Mark UI dead; signal any running stream to stop
+        self._ui_alive = False
+        try:
+            self.stop_event.set()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def copy_text(self, text: str):
+        if text:
+            self.chat_box.clipboard_clear()
+            self.chat_box.clipboard_append(text)
+
+    def copy_all(self):
+        self.copy_text(pprint.pformat(self.chat_history))
+
+    @staticmethod
+    def open_homepage():
+        webbrowser.open("https://github.com/chyok/ollama-gui")
+
+    def show_help(self):
+        # Kept for code integrity; used as About dialog now.
+        info = (
+            "Project: Ollama GUI\n"
+            f"Version: {__version__}\n"
+            f"Revision Date: {__revision_date__}\n"
+            "\n"
+            "Contributors:\n"
+            " - chyok (Original Author)\n"
+            " - Dr. Eric O. Flores (Enhancements / Revisions)\n"
+            "\n"
+            "Source:\n"
+            " https://github.com/chyok/ollama-gui\n"
+            "\n"
+            "Keys:\n"
+            " <Enter>: send\n"
+            " <Shift+Enter>: new line\n"
+            " <Double click dialog>: edit dialog\n"
+        )
+        messagebox.showinfo("About", info, parent=self.root)
+
+    def show_about(self):
+        # New name for clarity, calls existing function to maintain integrity
+        self.show_help()
+
+    def check_system(self):
+        message = _system_check(self.root)
+        if message is not None:
+            messagebox.showwarning("Warning", message, parent=self.root)
+
+    def append_text_to_chat(self, text: str, *args, use_label: bool = False):
+        self.chat_box.config(state=tk.NORMAL)
+        if use_label:
+            cur_label_widget = self.label_widgets[-1]
+            cur_label_widget.config(text=cur_label_widget.cget("text") + text)
+        else:
+            self.chat_box.insert(tk.END, text, *args)
+        self.chat_box.see(tk.END)
+        self.chat_box.config(state=tk.DISABLED)
+
+    def append_log_to_inner_textbox(self, message: Optional[str] = None, clear: bool = False):
+        if self.log_textbox.winfo_exists():
+            self.log_textbox.config(state=tk.NORMAL)
+            if clear:
+                self.log_textbox.delete(1.0, tk.END)
+            elif message:
+                self.log_textbox.insert(tk.END, message + "\n")
+            self.log_textbox.config(state=tk.DISABLED)
+            self.log_textbox.see(tk.END)
+
+    def resize_inner_text_widget(self, event: tk.Event):
+        for i in self.label_widgets:
+            current_width = event.widget.winfo_width()
+            max_width = int(current_width) * 0.7
+            i.config(wraplength=max_width)
+
+    def show_error(self, text):
+        self.model_select.set(text)
+        self.model_select.config(foreground="red")
+        self.model_select["values"] = []
+        self.send_button.state(["disabled"])
+
+    def show_process_bar(self):
+        self.progress.grid(row=0, column=0, sticky="nsew")
+        self.stop_button.grid(row=0, column=1, padx=20)
+        self.progress.start(5)
+
+    def hide_process_bar(self):
+        self.progress.stop()
+        self.stop_button.grid_remove()
+        self.progress.grid_remove()
+
+    # =========================
+    # Fix #2: Stop/cancel logic
+    # =========================
+    def request_stop(self):
+        """
+        Stop the currently running stream/task.
+        This uses a real cancellation event (thread-safe) rather than widget state.
+        """
+        self.stop_event.set()
+        # UX: disable stop button immediately so user sees it took effect
+        try:
+            self.stop_button.state(["disabled"])
+        except Exception:
+            pass
+
+    def prepare_new_request(self):
+        """
+        Reset cancellation state for a new request and enable Stop.
+        """
+        self.stop_event.clear()
+        try:
+            self.stop_button.state(["!disabled"])
+        except Exception:
+            pass
+
+    def handle_key_press(self, event: tk.Event):
+        if event.keysym == "Return":
+            if event.state & 0x1 == 0x1:  # Shift key is pressed
+                self.user_input.insert("end", "\n")
+            elif "disabled" not in self.send_button.state():
+                self.on_send_button(event)
+            return "break"
+
+    def refresh_models(self):
+        self.update_host()
+        self.model_select.config(foreground="black")
+        self.model_select.set("Waiting...")
+        self.send_button.state(["disabled"])
+        self.refresh_button.state(["disabled"])
+        Thread(target=self.update_model_select, daemon=True).start()
+
+    def update_host(self):
+        self.api_url = self.host_input.get()
+
+    def update_model_select(self):
+        # Worker thread: DO NOT touch tkinter directly.
+        try:
+            models = self.fetch_models()
+
+            def _apply_models():
+                self.model_select["values"] = models
+                if models:
+                    self.model_select.set(models[0])
+                    self.send_button.state(["!disabled"])
+                else:
+                    self.show_error("You need download a model!")
+
+            self.ui(_apply_models)
+
+        except Exception:  # noqa
+            self.ui(self.show_error, "Error! Please check the host.")
+        finally:
+            self.ui(lambda: self.refresh_button.state(["!disabled"]))
+
+    def update_model_list(self):
+        # Worker thread: DO NOT touch tkinter directly.
+        try:
+            models = self.fetch_models()
+
+            def _populate():
+                if self.models_list.winfo_exists():
+                    self.models_list.delete(0, tk.END)
+                    for model in models:
+                        self.models_list.insert(tk.END, model)
+
+            self.ui(_populate)
+
+        except Exception:  # noqa
+            self.ui(self.append_log_to_inner_textbox, "Error! Please check the Ollama host.")
+
+    def on_send_button(self, _=None):
+        message = self.user_input.get("1.0", "end-1c")
+        if message:
+            self.layout.create_inner_label(on_right_side=True)
+            self.append_text_to_chat(f"{message}", use_label=True)
+            self.append_text_to_chat("\n\n")
+            self.user_input.delete("1.0", "end")
+            self.chat_history.append({"role": "user", "content": message})
+
+            Thread(target=self.generate_ai_response, daemon=True).start()
+
+    def generate_ai_response(self):
+        # Worker thread: perform network I/O here; schedule all UI changes via ui()/ui_sync().
+        try:
+            self.ui_sync(self.show_process_bar)
+            self.ui(self.prepare_new_request)  # Fix #2: reset stop event + enable stop
+
+            self.ui(lambda: self.send_button.state(["disabled"]))
+            self.ui(lambda: self.refresh_button.state(["disabled"]))
+
+            model_name = self.model_select.get()
+            self.ui(self.append_text_to_chat, f"{model_name}\n", ("Bold",))
+
+            ai_message = ""
+            self.ui_sync(self.layout.create_inner_label)
+
+            for chunk in self.fetch_chat_stream_result():
+                if self.stop_event.is_set():
+                    break
+                self.ui(self.append_text_to_chat, f"{chunk}", use_label=True)
+                ai_message += chunk
+
+            if self.stop_event.is_set():
+                # Optional: record partial assistant message only if non-empty
+                if ai_message.strip():
+                    self.chat_history.append({"role": "assistant", "content": ai_message})
+                    # Attach mapping of the just-finished assistant label -> chat_history index
+                    try:
+                        self.label_widgets[-1]._msg_index = len(self.chat_history) - 1  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                self.ui(self.append_text_to_chat, "\n\n[Stopped]\n\n", ("Error",))
+            else:
+                self.chat_history.append({"role": "assistant", "content": ai_message})
+                # Attach mapping of the assistant label -> chat_history index
+                try:
+                    self.label_widgets[-1]._msg_index = len(self.chat_history) - 1  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                self.ui(self.append_text_to_chat, "\n\n")
+
+        except Exception:  # noqa
+            self.ui(self.append_text_to_chat, "\nAI error!\n\n", ("Error",))
+        finally:
+            self.ui(self.hide_process_bar)
+            self.ui(lambda: self.send_button.state(["!disabled"]))
+            self.ui(lambda: self.refresh_button.state(["!disabled"]))
+            # Ready for next request
+            self.ui(lambda: self.stop_button.state(["!disabled"]))
+
+    # =========================
+    # Fix #2: Add timeouts to network calls
+    # =========================
+    def fetch_models(self) -> List[str]:
+        with urllib.request.urlopen(
+            urllib.parse.urljoin(self.api_url, "/api/tags"),
+            timeout=self.net_timeout,
+        ) as response:
+            data = json.load(response)
+            models = [model["name"] for model in data.get("models", [])]
+            return models
+
+    def fetch_chat_stream_result(self) -> Generator:
+        request = urllib.request.Request(
+            urllib.parse.urljoin(self.api_url, "/api/chat"),
+            data=json.dumps(
+                {
+                    "model": self.model_select.get(),
+                    "messages": self.chat_history,
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=self.net_timeout) as resp:
+            for line in resp:
+                if self.stop_event.is_set():
+                    break
+                data = json.loads(line.decode("utf-8"))
+                if "message" in data:
+                    time.sleep(0.01)
+                    yield data["message"]["content"]
+
+    def delete_model(self, model_name: str):
+        self.ui(self.append_log_to_inner_textbox, clear=True)
+        if not model_name:
+            return
+
+        req = urllib.request.Request(
+            urllib.parse.urljoin(self.api_url, "/api/delete"),
+            data=json.dumps({"name": model_name}).encode("utf-8"),
+            method="DELETE",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.net_timeout) as response:
+                if response.status == 200:
+                    self.ui(self.append_log_to_inner_textbox, "Model deleted successfully.")
+                elif response.status == 404:
+                    self.ui(self.append_log_to_inner_textbox, "Model not found.")
+                else:
+                    self.ui(self.append_log_to_inner_textbox, f"Delete returned status: {response.status}")
+        except Exception as e:
+            self.ui(self.append_log_to_inner_textbox, f"Failed to delete model: {e}")
+        finally:
+            Thread(target=self.update_model_list, daemon=True).start()
+            Thread(target=self.update_model_select, daemon=True).start()
+
+    def download_model(self, model_name: str, insecure: bool = False):
+        self.ui(self.append_log_to_inner_textbox, clear=True)
+        if not model_name:
+            return
+
+        self.ui(lambda: self.download_button.state(["disabled"]))
+
+        req = urllib.request.Request(
+            urllib.parse.urljoin(self.api_url, "/api/pull"),
+            data=json.dumps(
+                {"name": model_name, "insecure": insecure, "stream": True}
+            ).encode("utf-8"),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.net_timeout) as response:
+                for line in response:
+                    if self.stop_event.is_set():
+                        self.ui(self.append_log_to_inner_textbox, "Download stopped.")
+                        break
+                    data = json.loads(line.decode("utf-8"))
+                    log = data.get("error") or data.get("status") or "No response"
+                    if "status" in data:
+                        total = data.get("total")
+                        completed = data.get("completed", 0)
+                        if total:
+                            log += f" [{completed}/{total}]"
+                    self.ui(self.append_log_to_inner_textbox, log)
+        except Exception as e:
+            self.ui(self.append_log_to_inner_textbox, f"Failed to download model: {e}")
+        finally:
+            Thread(target=self.update_model_list, daemon=True).start()
+            Thread(target=self.update_model_select, daemon=True).start()
+
+            def _reenable():
+                if self.download_button.winfo_exists():
+                    self.download_button.state(["!disabled"])
+
+            self.ui(_reenable)
+
+    def clear_chat(self):
+        for i in self.label_widgets:
+            i.destroy()
+        self.label_widgets.clear()
+        self.chat_box.config(state=tk.NORMAL)
+        self.chat_box.delete(1.0, tk.END)
+        self.chat_box.config(state=tk.DISABLED)
+        self.chat_history.clear()
+
+    def save_chat(self):
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Save Chat As",
+        )
+        if filepath:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(self.chat_history, f, indent=2)
+
+    def load_chat(self):
+        filepath = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Load Chat",
+        )
+        if not filepath:
+            return
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            try:
+                history = json.load(f)
+                if isinstance(history, list) and all("role" in item and "content" in item for item in history):
+                    self.clear_chat()
+                    self.chat_history = history
+
+                    # Rebuild chat display (and re-attach label -> message mapping)
+                    for idx, message in enumerate(self.chat_history):
+                        if message["role"] != "user":
+                            self.append_text_to_chat(f"{self.model_select.get()}\n", ("Bold",))
+                            self.layout.create_inner_label(on_right_side=False, msg_index=idx)
+                        else:
+                            self.layout.create_inner_label(on_right_side=True, msg_index=idx)
+
+                        self.append_text_to_chat(message["content"], use_label=True)
+                        self.append_text_to_chat("\n\n")
+                else:
+                    messagebox.showerror("Error", "Invalid chat file format.", parent=self.root)
+            except json.JSONDecodeError:
+                messagebox.showerror("Error", "Could not decode JSON from file.", parent=self.root)
+
+
+class LayoutManager:
+    def __init__(self, interface: OllamaInterface):
+        self.interface: OllamaInterface = interface
+        self.management_window: Optional[tk.Toplevel] = None
+        self.editor_window: Optional[tk.Toplevel] = None
+
+    def init_layout(self):
+        self._header_frame()
+        self._chat_container_frame()
+        self._processbar_frame()
+        self._input_frame()
+
+    def _header_frame(self):
+        header_frame = ttk.Frame(self.interface.root)
+        header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=20)
+        header_frame.grid_columnconfigure(3, weight=1)
+
+        model_select = ttk.Combobox(header_frame, state="readonly", width=30)
+        model_select.grid(row=0, column=0)
+
+        settings_button = ttk.Button(
+            header_frame, text="⚙️", command=self.show_model_management_window, width=3
+        )
+        settings_button.grid(row=0, column=1, padx=(5, 0))
+
+        refresh_button = ttk.Button(header_frame, text="Refresh", command=self.interface.refresh_models)
+        refresh_button.grid(row=0, column=2, padx=(5, 0))
+
+        ttk.Label(header_frame, text="Host:").grid(row=0, column=4, padx=(10, 0))
+
+        host_input = ttk.Entry(header_frame, width=24)
+        host_input.grid(row=0, column=5, padx=(5, 15))
+        host_input.insert(0, self.interface.api_url)
+
+        self.interface.model_select = model_select
+        self.interface.refresh_button = refresh_button
+        self.interface.host_input = host_input
+
+    def _chat_container_frame(self):
+        chat_frame = ttk.Frame(self.interface.root)
+        chat_frame.grid(row=1, column=0, sticky="nsew", padx=20)
+        chat_frame.grid_columnconfigure(0, weight=1)
+        chat_frame.grid_rowconfigure(0, weight=1)
+
+        chat_box = tk.Text(
+            chat_frame,
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            font=(self.interface.default_font, 12),
+            spacing1=5,
+            highlightthickness=0,
+        )
+        chat_box.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(chat_frame, orient="vertical", command=chat_box.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        chat_box.configure(yscrollcommand=scrollbar.set)
+
+        chat_box_menu = tk.Menu(chat_box, tearoff=0)
+        chat_box_menu.add_command(label="Copy All", command=self.interface.copy_all)
+        chat_box_menu.add_separator()
+        chat_box_menu.add_command(label="Clear Chat", command=self.interface.clear_chat)
+        chat_box.bind("<Configure>", self.interface.resize_inner_text_widget)
+
+        _right_click = "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
+        chat_box.bind(_right_click, lambda e: chat_box_menu.post(e.x_root, e.y_root))
+
+        self.interface.chat_box = chat_box
+
+    def _processbar_frame(self):
+        process_frame = ttk.Frame(self.interface.root, height=28)
+        process_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=10)
+
+        progress = ttk.Progressbar(
+            process_frame,
+            mode="indeterminate",
+            style="LoadingBar.Horizontal.TProgressbar",
+        )
+
+        # Fix #2: Stop uses a real Event
+        stop_button = ttk.Button(
+            process_frame,
+            width=5,
+            text="Stop",
+            command=self.interface.request_stop,
+        )
+
+        self.interface.progress = progress
+        self.interface.stop_button = stop_button
+
+    def _input_frame(self):
+        input_frame = ttk.Frame(self.interface.root)
+        input_frame.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 20))
+        input_frame.grid_columnconfigure(0, weight=1)
+
+        user_input = tk.Text(
+            input_frame, font=(self.interface.default_font, 12), height=4, wrap=tk.WORD
+        )
+        user_input.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+
+        # ✅ Binding Fix: bind ONLY Return (not all keys)
+        user_input.bind("<Return>", self.interface.handle_key_press)
+
+        send_button = ttk.Button(
+            input_frame,
+            text="Send",
+            command=self.interface.on_send_button,
+        )
+        send_button.grid(row=0, column=1)
+        send_button.state(["disabled"])
+
+        menubar = tk.Menu(self.interface.root)
+        self.interface.root.config(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Save Chat", command=self.interface.save_chat)
+        file_menu.add_command(label="Load Chat", command=self.interface.load_chat)
+        file_menu.add_separator()
+        file_menu.add_command(label="Model Management", command=self.show_model_management_window)
+        file_menu.add_command(label="Exit", command=self.interface.root.quit)
+
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Edit", menu=edit_menu)
+        edit_menu.add_command(label="Copy All", command=self.interface.copy_all)
+        edit_menu.add_command(label="Clear Chat", command=self.interface.clear_chat)
+
+        # Requested change: Help menu -> About
+        about_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="About", menu=about_menu)
+        about_menu.add_command(label="Source Code", command=self.interface.open_homepage)
+        about_menu.add_command(label="About", command=self.interface.show_about)
+
+        self.interface.user_input = user_input
+        self.interface.send_button = send_button
+
+    def show_model_management_window(self):
+        self.interface.update_host()
+
+        if self.management_window and self.management_window.winfo_exists():
+            self.management_window.lift()
+            return
+
+        management_window = tk.Toplevel(self.interface.root)
+        management_window.title("Model Management")
+        screen_width = self.interface.root.winfo_screenwidth()
+        screen_height = self.interface.root.winfo_screenheight()
+        x = int((screen_width / 2) - (400 / 2))
+        y = int((screen_height / 2) - (500 / 2))
+        management_window.geometry(f"{400}x{500}+{x}+{y}")
+
+        management_window.grid_columnconfigure(0, weight=1)
+        management_window.grid_rowconfigure(3, weight=1)
+
+        frame = ttk.Frame(management_window)
+        frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        frame.grid_columnconfigure(0, weight=1)
+
+        model_name_input = ttk.Entry(frame)
+        model_name_input.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+
+        def _download():
+            arg = model_name_input.get().strip()
+            if arg.startswith("ollama run "):
+                arg = arg[11:]
+            # Reset stop state for long operations too (optional but useful)
+            self.interface.stop_event.clear()
+            Thread(target=self.interface.download_model, daemon=True, args=(arg,)).start()
+
+        def _delete():
+            arg = models_list.get(tk.ACTIVE).strip()
+            Thread(target=self.interface.delete_model, daemon=True, args=(arg,)).start()
+
+        download_button = ttk.Button(frame, text="Download", command=_download)
+        download_button.grid(row=0, column=1, sticky="ew")
+
+        tips = tk.Label(
+            frame,
+            text="find models: https://ollama.com/library",
+            fg="blue",
+            cursor="hand2",
+        )
+        tips.bind("<Button-1>", lambda e: webbrowser.open("https://ollama.com/library"))
+        tips.grid(row=1, column=0, sticky="W", padx=(0, 5), pady=5)
+
+        list_action_frame = ttk.Frame(management_window)
+        list_action_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        list_action_frame.grid_columnconfigure(0, weight=1)
+        list_action_frame.grid_rowconfigure(0, weight=1)
+
+        models_list = tk.Listbox(list_action_frame)
+        models_list.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(list_action_frame, orient="vertical", command=models_list.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        models_list.config(yscrollcommand=scrollbar.set)
+
+        delete_button = ttk.Button(list_action_frame, text="Delete", command=_delete)
+        delete_button.grid(row=0, column=2, sticky="ew", padx=(5, 0))
+
+        log_textbox = tk.Text(management_window)
+        log_textbox.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        log_textbox.config(state="disabled")
+
+        self.management_window = management_window
+
+        self.interface.log_textbox = log_textbox
+        self.interface.download_button = download_button
+        self.interface.delete_button = delete_button
+        self.interface.models_list = models_list
+
+        Thread(target=self.interface.update_model_list, daemon=True).start()
+
+    def show_editor_window(self, _, inner_label):
+        if self.editor_window and self.editor_window.winfo_exists():
+            self.editor_window.lift()
+            return
+
+        editor_window = tk.Toplevel(self.interface.root)
+        editor_window.title("Chat Editor")
+
+        screen_width = self.interface.root.winfo_screenwidth()
+        screen_height = self.interface.root.winfo_screenheight()
+        x = int((screen_width / 2) - (400 / 2))
+        y = int((screen_height / 2) - (300 / 2))
+        editor_window.geometry(f"{400}x{300}+{x}+{y}")
+
+        chat_editor = tk.Text(editor_window)
+        chat_editor.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        chat_editor.insert(tk.END, inner_label.cget("text"))
+
+        editor_window.grid_rowconfigure(0, weight=1)
+        editor_window.grid_columnconfigure(0, weight=1)
+        editor_window.grid_columnconfigure(1, weight=1)
+
+        def _save():
+            msg_index = getattr(inner_label, "_msg_index", None)
+            if isinstance(msg_index, int) and 0 <= msg_index < len(self.interface.chat_history):
+                self.interface.chat_history[msg_index]["content"] = chat_editor.get("1.0", "end-1c")
+                inner_label.config(text=chat_editor.get("1.0", "end-1c"))
+            else:
+                messagebox.showerror(
+                    "Error",
+                    "Cannot map this bubble to chat history (index missing).",
+                    parent=self.interface.root,
+                )
+            editor_window.destroy()
+
+        save_button = tk.Button(editor_window, text="Save", command=_save)
+        save_button.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+
+        cancel_button = tk.Button(editor_window, text="Cancel", command=editor_window.destroy)
+        cancel_button.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+
+        editor_window.grid_columnconfigure(0, weight=1, uniform="btn")
+        editor_window.grid_columnconfigure(1, weight=1, uniform="btn")
+
+        self.editor_window = editor_window
+
+    def create_inner_label(self, on_right_side: bool = False, msg_index: Optional[int] = None):
+        """
+        Create a chat bubble label, and attach a stable mapping to chat_history via msg_index.
+
+        msg_index:
+            If provided, this label corresponds to chat_history[msg_index].
+            This prevents label_widgets index drift from corrupting edits.
+        """
+        background = "#48a4f2" if on_right_side else "#eaeaea"
+        foreground = "white" if on_right_side else "black"
+        max_width = int(self.interface.chat_box.winfo_reqwidth()) * 0.7
+        inner_label = tk.Label(
+            self.interface.chat_box,
+            justify=tk.LEFT,
+            wraplength=max_width,
+            background=background,
+            highlightthickness=0,
+            highlightbackground=background,
+            foreground=foreground,
+            padx=8,
+            pady=8,
+            font=(self.interface.default_font, 12),
+            borderwidth=0,
+        )
+
+        # ✅ Patch: attach stable mapping
+        if msg_index is not None:
+            try:
+                inner_label._msg_index = int(msg_index)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+        self.interface.label_widgets.append(inner_label)
+
+        inner_label.bind(
+            "<MouseWheel>",
+            lambda e: self.interface.chat_box.yview_scroll(int(-1 * (e.delta / 120)), "units"),
+        )
+        inner_label.bind("<Double-1>", lambda e: self.show_editor_window(e, inner_label))
+
+        _right_menu = tk.Menu(inner_label, tearoff=0)
+        _right_menu.add_command(label="Edit", command=lambda: self.show_editor_window(None, inner_label))
+        _right_menu.add_command(
+            label="Copy This", command=lambda: self.interface.copy_text(inner_label.cget("text"))
+        )
+        _right_menu.add_separator()
+        _right_menu.add_command(label="Clear Chat", command=self.interface.clear_chat)
+        _right_click = "<Button-2>" if platform.system().lower() == "darwin" else "<Button-3>"
+        inner_label.bind(_right_click, lambda e: _right_menu.post(e.x_root, e.y_root))
+
+        self.interface.chat_box.window_create(tk.END, window=inner_label)
+        if on_right_side:
+            idx = self.interface.chat_box.index("end-1c").split(".")[0]
+            self.interface.chat_box.tag_add("Right", f"{idx}.0", f"{idx}.end")
+
+        return inner_label
+
+
+def run():
+    root = tk.Tk()
+
+    root.title("Ollama GUI")
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.geometry(f"800x600+{(screen_width - 800) // 2}+{(screen_height - 600) // 2}")
+
+    root.grid_columnconfigure(0, weight=1)
+    root.grid_rowconfigure(1, weight=1)
+    root.grid_rowconfigure(2, weight=0)
+    root.grid_rowconfigure(3, weight=0)
+
+    app = OllamaInterface(root)
+
+    app.chat_box.tag_configure("Bold", foreground="#ff007b", font=(app.default_font, 10, "bold"))
+    app.chat_box.tag_configure("Error", foreground="red")
+    app.chat_box.tag_configure("Right", justify="right")
+
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    run()

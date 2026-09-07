@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.drericflores.ollama-speak</id>
+  <name>Ollama Speak</name>
+  <summary>Local Ollama chat with multilingual offline speech</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.drericflores">
+    <name>Dr. Eric O. Flores</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <description>
+    <p>
+      Ollama Speak is a local-first Linux desktop client for chatting with
+      Ollama models and listening to responses synthesized locally by Piper.
+    </p>
+    <p>
+      It provides streaming conversations, completion-model filtering,
+      multilingual voice discovery, selectable timbre, persistent settings,
+      and clean cancellation of generation and speech.
+    </p>
+  </description>
+  <launchable type="desktop-id">
+    io.github.drericflores.ollama-speak.desktop
+  </launchable>
+  <url type="homepage">https://github.com/drericflores/ollama-speak</url>
+  <url type="bugtracker">https://github.com/drericflores/ollama-speak/issues</url>
+  <provides>
+    <binary>ollama-speak</binary>
+  </provides>
+  <releases>
+    <release version="1.4.0" date="2026-09-06">
+      <description>
+        <p>
+          Consolidated release with multilingual Piper speech, reliability
+          improvements, regression tests, and standards-based packaging.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>
+
