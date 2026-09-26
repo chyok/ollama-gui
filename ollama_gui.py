@@ -6,6 +6,7 @@ import pprint
 import platform
 import webbrowser
 
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -33,6 +34,16 @@ def _version_tuple(v: str) -> tuple:
     for point in v.split("."):
         filled.append(point.zfill(8))
     return tuple(filled)
+
+
+def _error_message(e: Exception) -> str:
+    """Prefer the reason returned by Ollama: {"error": "..."}"""
+    if isinstance(e, urllib.error.HTTPError):
+        try:
+            return json.load(e)["error"]
+        except Exception:  # noqa
+            pass
+    return str(e)
 
 
 def _system_check(root: tk.Tk) -> Optional[str]:
@@ -282,28 +293,32 @@ class OllamaInterface:
 
     def generate_ai_response(self, model: str, messages: List[dict], stop_event: Event):
         """Worker thread: read the stream, the widgets are updated by the main thread"""
-        ai_message = ""
-        error = False
+        thinking = ai_message = ""
+        error = None
         try:
-            for i in self.fetch_chat_stream_result(model, messages, stop_event):
-                self.run_on_ui(self.append_ai_text, i)
-                ai_message += i
-        except Exception:  # noqa
-            error = True
+            for message in self.fetch_chat_stream_result(model, messages, stop_event):
+                thinking += message.get("thinking") or ""
+                ai_message += message.get("content") or ""
+                # the thinking is shown until the answer starts
+                self.run_on_ui(self.set_ai_text, ai_message or thinking)
+        except Exception as e:  # noqa
+            error = _error_message(e)
         finally:
             self.run_on_ui(self.finish_ai_response, ai_message, error)
 
-    def append_ai_text(self, text: str):
+    def set_ai_text(self, text: str):
         # the label is gone if the chat was cleared while generating
         if self.ai_label in self.label_widgets:
-            self.append_text_to_chat(text, use_label=True)
+            self.ai_label.config(text=text)
+            self.chat_box.see(tk.END)
 
-    def finish_ai_response(self, ai_message: str, error: bool = False):
+    def finish_ai_response(self, ai_message: str, error: Optional[str] = None):
         try:
             if self.ai_label in self.label_widgets:
                 if error:
-                    self.append_text_to_chat("\nAI error!\n\n", ("Error",))
+                    self.append_text_to_chat(f"\nAI error! {error}\n\n", ("Error",))
                 else:
+                    self.set_ai_text(ai_message)
                     self.chat_history.append({"role": "assistant", "content": ai_message})
                     self.append_text_to_chat("\n\n")
         finally:
@@ -343,9 +358,11 @@ class OllamaInterface:
                 if stop_event.is_set():  # stop
                     break
                 data = json.loads(line.decode("utf-8"))
+                if "error" in data:
+                    raise RuntimeError(data["error"])
                 if "message" in data:
                     time.sleep(0.01)
-                    yield data["message"]["content"]
+                    yield data["message"]
 
     def delete_model(self, model_name: str):
         self.run_on_ui(self.append_log_to_inner_textbox, clear=True)
@@ -354,22 +371,19 @@ class OllamaInterface:
 
         req = urllib.request.Request(
             urllib.parse.urljoin(self.api_url, "/api/delete"),
-            data=json.dumps({"name": model_name}).encode("utf-8"),
+            data=json.dumps({"model": model_name}).encode("utf-8"),
             method="DELETE",
         )
         try:
-            with urllib.request.urlopen(req) as response:
-                if response.status == 200:
-                    self.run_on_ui(self.append_log_to_inner_textbox, "Model deleted successfully.")
-                elif response.status == 404:
-                    self.run_on_ui(self.append_log_to_inner_textbox, "Model not found.")
-        except Exception as e:
-            self.run_on_ui(self.append_log_to_inner_textbox, f"Failed to delete model: {e}")
-        finally:
-            self.update_model_list()
-            self.update_model_select()
+            urllib.request.urlopen(req).close()
+            log = "Model deleted successfully."
+        except Exception as e:  # noqa
+            log = f"Failed to delete model: {_error_message(e)}"
+        self.run_on_ui(self.append_log_to_inner_textbox, log)
+        self.update_model_list()
+        self.update_model_select()
 
-    def download_model(self, model_name: str, insecure: bool = False):
+    def download_model(self, model_name: str):
         self.run_on_ui(self.append_log_to_inner_textbox, clear=True)
         if not model_name:
             return
@@ -378,9 +392,7 @@ class OllamaInterface:
 
         req = urllib.request.Request(
             urllib.parse.urljoin(self.api_url, "/api/pull"),
-            data=json.dumps(
-                {"name": model_name, "insecure": insecure, "stream": True}
-            ).encode("utf-8"),
+            data=json.dumps({"model": model_name, "stream": True}).encode("utf-8"),
             method="POST",
         )
         try:
@@ -395,7 +407,7 @@ class OllamaInterface:
                             log += f" [{completed}/{total}]"
                     self.run_on_ui(self.append_log_to_inner_textbox, log)
         except Exception as e:
-            self.run_on_ui(self.append_log_to_inner_textbox, f"Failed to download model: {e}")
+            self.run_on_ui(self.append_log_to_inner_textbox, f"Failed to download model: {_error_message(e)}")
         finally:
             self.update_model_list()
             self.update_model_select()

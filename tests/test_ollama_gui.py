@@ -3,6 +3,7 @@ import json
 import time
 import threading
 import unittest
+import urllib.error
 
 from unittest import mock
 
@@ -10,7 +11,7 @@ import _tkinter
 import tkinter as tk
 
 import ollama_gui
-from ollama_gui import OllamaInterface, _system_check, _version_tuple
+from ollama_gui import OllamaInterface, _error_message, _system_check, _version_tuple
 
 
 class FakeResponse:
@@ -31,6 +32,30 @@ class FakeResponse:
 
     def read(self, *_):
         return b"".join(self.lines)
+
+    def close(self):
+        pass
+
+
+def http_error(code, body):
+    return urllib.error.HTTPError("http://127.0.0.1:11434", code, "Error", {}, FakeResponse([body]))
+
+
+def content(*texts):
+    return iter([{"role": "assistant", "content": i} for i in texts])
+
+
+class ErrorMessageTest(unittest.TestCase):
+    def test_reason_from_ollama(self):
+        e = http_error(404, {"error": "model 'x' not found"})
+        self.assertEqual(_error_message(e), "model 'x' not found")
+
+    def test_http_error_without_reason(self):
+        e = urllib.error.HTTPError("http://127.0.0.1:11434", 502, "Bad Gateway", {}, None)
+        self.assertEqual(_error_message(e), "HTTP Error 502: Bad Gateway")
+
+    def test_other_error(self):
+        self.assertEqual(_error_message(OSError("connection refused")), "connection refused")
 
 
 class VersionTupleTest(unittest.TestCase):
@@ -171,34 +196,51 @@ class WorkerThreadTest(unittest.TestCase):
         self.widgets.models_list.insert.assert_not_called()
 
     def test_generate_ai_response(self):
-        self.app.fetch_chat_stream_result = mock.Mock(return_value=iter(["Hel", "lo"]))
-        self.app.append_ai_text = mock.Mock()
+        self.app.fetch_chat_stream_result = mock.Mock(return_value=content("Hel", "lo"))
+        self.app.set_ai_text = mock.Mock()
         self.app.finish_ai_response = mock.Mock()
         messages = [{"role": "user", "content": "hi"}]
         self.run_in_worker(self.app.generate_ai_response, "llama3", messages, self.app.stop_event)
 
         self.app.fetch_chat_stream_result.assert_called_once_with(
             "llama3", messages, self.app.stop_event)
-        self.app.append_ai_text.assert_not_called()
+        self.app.set_ai_text.assert_not_called()
         self.app.finish_ai_response.assert_not_called()
 
         self.app.drain_ui_queue()
-        self.assertEqual(self.app.append_ai_text.call_args_list, [mock.call("Hel"), mock.call("lo")])
-        self.app.finish_ai_response.assert_called_once_with("Hello", False)
+        self.assertEqual(self.app.set_ai_text.call_args_list, [mock.call("Hel"), mock.call("Hello")])
+        self.app.finish_ai_response.assert_called_once_with("Hello", None)
+
+    def test_generate_ai_response_with_thinking(self):
+        self.app.fetch_chat_stream_result = mock.Mock(return_value=iter([
+            {"content": "", "thinking": "Hm"},
+            {"content": "", "thinking": "m."},
+            {"content": "Hel"},
+            {"content": "lo"},
+        ]))
+        self.app.set_ai_text = mock.Mock()
+        self.app.finish_ai_response = mock.Mock()
+        self.run_in_worker(self.app.generate_ai_response, "qwen3", [], self.app.stop_event)
+
+        self.app.drain_ui_queue()
+        self.assertEqual(
+            self.app.set_ai_text.call_args_list,
+            [mock.call("Hm"), mock.call("Hmm."), mock.call("Hel"), mock.call("Hello")])
+        self.app.finish_ai_response.assert_called_once_with("Hello", None)
 
     def test_generate_ai_response_with_error(self):
         def broken_stream(*_):
-            yield "Hel"
+            yield {"content": "Hel"}
             raise OSError("connection reset")
 
         self.app.fetch_chat_stream_result = broken_stream
-        self.app.append_ai_text = mock.Mock()
+        self.app.set_ai_text = mock.Mock()
         self.app.finish_ai_response = mock.Mock()
         self.run_in_worker(self.app.generate_ai_response, "llama3", [], self.app.stop_event)
 
         self.app.drain_ui_queue()
-        self.app.append_ai_text.assert_called_once_with("Hel")
-        self.app.finish_ai_response.assert_called_once_with("Hel", True)
+        self.app.set_ai_text.assert_called_once_with("Hel")
+        self.app.finish_ai_response.assert_called_once_with("Hel", "connection reset")
 
     def test_delete_model(self):
         self.app.fetch_models = lambda: []
@@ -208,7 +250,7 @@ class WorkerThreadTest(unittest.TestCase):
         request = urlopen.call_args[0][0]
         self.assertEqual(request.full_url, "http://127.0.0.1:11434/api/delete")
         self.assertEqual(request.get_method(), "DELETE")
-        self.assertEqual(json.loads(request.data.decode("utf-8")), {"name": "llama3:latest"})
+        self.assertEqual(json.loads(request.data.decode("utf-8")), {"model": "llama3:latest"})
 
         self.app.drain_ui_queue()
         self.widgets.log_textbox.delete.assert_called_once_with(1.0, tk.END)
@@ -218,12 +260,14 @@ class WorkerThreadTest(unittest.TestCase):
 
     def test_delete_model_with_error(self):
         self.app.fetch_models = lambda: []
-        with mock.patch("urllib.request.urlopen", side_effect=OSError("boom")):
+        error = http_error(404, {"error": "model 'llama3:latest' not found"})
+        with mock.patch("urllib.request.urlopen", side_effect=error):
             self.run_in_worker(self.app.delete_model, "llama3:latest")
 
         self.app.drain_ui_queue()
         self.widgets.log_textbox.insert.assert_called_once_with(
-            tk.END, "Failed to delete model: boom\n")
+            tk.END, "Failed to delete model: model 'llama3:latest' not found\n")
+        self.widgets.models_list.delete.assert_called_once_with(0, tk.END)
 
     def test_delete_model_without_name(self):
         with mock.patch("urllib.request.urlopen") as urlopen:
@@ -248,7 +292,7 @@ class WorkerThreadTest(unittest.TestCase):
         self.assertEqual(request.full_url, "http://127.0.0.1:11434/api/pull")
         self.assertEqual(
             json.loads(request.data.decode("utf-8")),
-            {"name": "phi3", "insecure": False, "stream": True})
+            {"model": "phi3", "stream": True})
 
         self.app.drain_ui_queue()
         self.assertEqual(
@@ -289,7 +333,9 @@ class WorkerThreadTest(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", return_value=response) as urlopen:
             self.run_in_worker(worker)
 
-        self.assertEqual(result, ["Hel", "lo"])
+        self.assertEqual(
+            result,
+            [{"role": "assistant", "content": "Hel"}, {"role": "assistant", "content": "lo"}])
         request = urlopen.call_args[0][0]
         self.assertEqual(request.full_url, "http://127.0.0.1:11434/api/chat")
         self.assertEqual(
@@ -303,9 +349,20 @@ class WorkerThreadTest(unittest.TestCase):
         ])
         with mock.patch("urllib.request.urlopen", return_value=response):
             stream = self.app.fetch_chat_stream_result("llama3", [], self.app.stop_event)
-            self.assertEqual(next(stream), "Hel")
+            self.assertEqual(next(stream)["content"], "Hel")
             self.app.stop_event.set()
             self.assertEqual(list(stream), [])
+
+    def test_fetch_chat_stream_result_with_error_line(self):
+        response = FakeResponse([
+            {"message": {"role": "assistant", "content": "Hel"}},
+            {"error": "an error was encountered while running the model"},
+        ])
+        with mock.patch("urllib.request.urlopen", return_value=response):
+            stream = self.app.fetch_chat_stream_result("llama3", [], self.app.stop_event)
+            self.assertEqual(next(stream)["content"], "Hel")
+            with self.assertRaisesRegex(RuntimeError, "an error was encountered"):
+                next(stream)
 
     def test_fetch_models(self):
         response = FakeResponse([{"models": [{"name": "llama3:latest"}, {"name": "phi3:latest"}]}])
@@ -404,7 +461,7 @@ class InterfaceTest(unittest.TestCase):
         self.assertNotIn("disabled", self.app.refresh_button.state())
 
     def test_send_message(self):
-        self.app.fetch_chat_stream_result = mock.Mock(return_value=iter(["Hel", "lo"]))
+        self.app.fetch_chat_stream_result = mock.Mock(return_value=content("Hel", "lo"))
         self.send("hi")
 
         # the ui is locked by the main thread before the worker starts
@@ -428,17 +485,59 @@ class InterfaceTest(unittest.TestCase):
         self.send("hi")
         self.wait_until(self.is_idle)
 
-        self.assertEqual(self.chat_text(), "\n\nllama3:latest\n\nAI error!\n\n")
+        self.assertEqual(self.chat_text(), "\n\nllama3:latest\n\nAI error! connection refused\n\n")
         start, end = self.app.chat_box.tag_ranges("Error")
-        self.assertEqual(self.app.chat_box.get(start, end), "\nAI error!\n\n")
+        self.assertEqual(self.app.chat_box.get(start, end), "\nAI error! connection refused\n\n")
         self.assertEqual(self.app.chat_history, [{"role": "user", "content": "hi"}])
+
+    def test_ai_error_while_streaming(self):
+        def stream(*_):
+            yield {"content": "Hel"}
+            raise RuntimeError("an error was encountered while running the model")
+
+        self.app.fetch_chat_stream_result = stream
+        self.send("hi")
+        self.wait_until(self.is_idle)
+
+        self.assertEqual(self.app.label_widgets[-1].cget("text"), "Hel")
+        self.assertIn("AI error! an error was encountered while running the model", self.chat_text())
+        self.assertEqual(self.app.chat_history, [{"role": "user", "content": "hi"}])
+
+    def test_thinking_is_replaced_by_the_answer(self):
+        def stream(_model, _messages, stop_event):
+            yield {"content": "", "thinking": "Hmm."}
+            stop_event.wait(5)
+            yield {"content": "Hello"}
+
+        self.app.fetch_chat_stream_result = stream
+        self.send("hi")
+        self.wait_until(lambda: self.app.label_widgets[-1].cget("text") == "Hmm.")
+
+        self.app.stop_event.set()
+        self.wait_until(self.is_idle)
+        self.assertEqual(self.app.label_widgets[-1].cget("text"), "Hello")
+        self.assertEqual(self.app.chat_history[-1], {"role": "assistant", "content": "Hello"})
+
+    def test_stop_while_thinking(self):
+        def stream(_model, _messages, stop_event):
+            yield {"content": "", "thinking": "Hmm."}
+            stop_event.wait(5)
+
+        self.app.fetch_chat_stream_result = stream
+        self.send("hi")
+        self.wait_until(lambda: self.app.label_widgets[-1].cget("text") == "Hmm.")
+
+        self.app.stop_button.invoke()
+        self.wait_until(self.is_idle)
+        self.assertEqual(self.app.label_widgets[-1].cget("text"), "")
+        self.assertEqual(self.app.chat_history[-1], {"role": "assistant", "content": ""})
 
     def test_stop(self):
         def stream(_model, _messages, stop_event):
-            yield "Hel"
+            yield {"content": "Hel"}
             stop_event.wait(5)
             if not stop_event.is_set():
-                yield "lo"
+                yield {"content": "lo"}
 
         self.app.fetch_chat_stream_result = stream
         self.send("hi")
@@ -454,9 +553,9 @@ class InterfaceTest(unittest.TestCase):
 
     def test_clear_chat_while_generating(self):
         def stream(_model, _messages, stop_event):
-            yield "Hel"
+            yield {"content": "Hel"}
             stop_event.wait(5)
-            yield "lo"
+            yield {"content": "lo"}
 
         self.app.fetch_chat_stream_result = stream
         self.send("hi")
@@ -491,7 +590,7 @@ class InterfaceTest(unittest.TestCase):
             widget.tk = TkApp()
         self.addCleanup(lambda: [setattr(widget, "tk", tk_app) for widget in widgets])
 
-        self.app.fetch_chat_stream_result = mock.Mock(return_value=iter(["Hel", "lo"]))
+        self.app.fetch_chat_stream_result = mock.Mock(return_value=content("Hel", "lo"))
         self.send("hi")
         self.wait_until(self.is_idle)
         self.app.refresh_models()
