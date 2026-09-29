@@ -39,7 +39,7 @@ Please refer to:
 [llmman](https://github.com/llmmanorg/llmman) is a local model runner that serves the Ollama API on port `17434`, so it works with Ollama-GUI as well.
 
 ```
-curl -fsSL https://raw.githubusercontent.com/llmmanorg/llmman/main/install.sh | sh
+curl -fsSL https://llmmanorg.github.io/install.sh | sh
 llmman pull gemma4
 llmman serve
 ```
