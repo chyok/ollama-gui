@@ -1,6 +1,8 @@
 import gc
+import os
 import json
 import time
+import tempfile
 import threading
 import unittest
 import urllib.error
@@ -197,19 +199,20 @@ class WorkerThreadTest(unittest.TestCase):
 
     def test_generate_ai_response(self):
         self.app.fetch_chat_stream_result = mock.Mock(return_value=content("Hel", "lo"))
-        self.app.set_ai_text = mock.Mock()
+        self.app.append_ai_text = mock.Mock()
         self.app.finish_ai_response = mock.Mock()
         messages = [{"role": "user", "content": "hi"}]
         self.run_in_worker(self.app.generate_ai_response, "llama3", messages, self.app.stop_event)
 
         self.app.fetch_chat_stream_result.assert_called_once_with(
             "llama3", messages, self.app.stop_event)
-        self.app.set_ai_text.assert_not_called()
+        self.app.append_ai_text.assert_not_called()
         self.app.finish_ai_response.assert_not_called()
 
         self.app.drain_ui_queue()
-        self.assertEqual(self.app.set_ai_text.call_args_list, [mock.call("Hel"), mock.call("Hello")])
-        self.app.finish_ai_response.assert_called_once_with("Hello", None)
+        self.assertEqual(
+            self.app.append_ai_text.call_args_list, [mock.call("Hel", ""), mock.call("lo", "")])
+        self.app.finish_ai_response.assert_called_once_with("Hello", "", None)
 
     def test_generate_ai_response_with_thinking(self):
         self.app.fetch_chat_stream_result = mock.Mock(return_value=iter([
@@ -218,15 +221,15 @@ class WorkerThreadTest(unittest.TestCase):
             {"content": "Hel"},
             {"content": "lo"},
         ]))
-        self.app.set_ai_text = mock.Mock()
+        self.app.append_ai_text = mock.Mock()
         self.app.finish_ai_response = mock.Mock()
         self.run_in_worker(self.app.generate_ai_response, "qwen3", [], self.app.stop_event)
 
         self.app.drain_ui_queue()
         self.assertEqual(
-            self.app.set_ai_text.call_args_list,
-            [mock.call("Hm"), mock.call("Hmm."), mock.call("Hel"), mock.call("Hello")])
-        self.app.finish_ai_response.assert_called_once_with("Hello", None)
+            self.app.append_ai_text.call_args_list,
+            [mock.call("", "Hm"), mock.call("", "m."), mock.call("Hel", ""), mock.call("lo", "")])
+        self.app.finish_ai_response.assert_called_once_with("Hello", "Hmm.", None)
 
     def test_generate_ai_response_with_error(self):
         def broken_stream(*_):
@@ -234,13 +237,13 @@ class WorkerThreadTest(unittest.TestCase):
             raise OSError("connection reset")
 
         self.app.fetch_chat_stream_result = broken_stream
-        self.app.set_ai_text = mock.Mock()
+        self.app.append_ai_text = mock.Mock()
         self.app.finish_ai_response = mock.Mock()
         self.run_in_worker(self.app.generate_ai_response, "llama3", [], self.app.stop_event)
 
         self.app.drain_ui_queue()
-        self.app.set_ai_text.assert_called_once_with("Hel")
-        self.app.finish_ai_response.assert_called_once_with("Hel", "connection reset")
+        self.app.append_ai_text.assert_called_once_with("Hel", "")
+        self.app.finish_ai_response.assert_called_once_with("Hel", "", "connection reset")
 
     def test_delete_model(self):
         self.app.fetch_models = lambda: []
@@ -445,6 +448,10 @@ class InterfaceTest(unittest.TestCase):
     def chat_text(self):
         return self.app.chat_box.get("1.0", "end-1c")
 
+    def thinking_text(self):
+        ranges = self.app.chat_box.tag_ranges("Thinking")
+        return [self.app.chat_box.get(*ranges[i:i + 2]) for i in range(0, len(ranges), 2)]
+
     def test_model_select(self):
         self.assertEqual(self.app.model_select.get(), "llama3:latest")
         self.assertEqual(list(self.app.model_select["values"]), ["llama3:latest"])
@@ -503,19 +510,40 @@ class InterfaceTest(unittest.TestCase):
         self.assertIn("AI error! an error was encountered while running the model", self.chat_text())
         self.assertEqual(self.app.chat_history, [{"role": "user", "content": "hi"}])
 
-    def test_thinking_is_replaced_by_the_answer(self):
-        def stream(_model, _messages, stop_event):
-            yield {"content": "", "thinking": "Hmm."}
-            stop_event.wait(5)
-            yield {"content": "Hello"}
-
-        self.app.fetch_chat_stream_result = stream
+    def test_thinking_is_kept_but_not_sent_back(self):
+        self.app.fetch_chat_stream_result = mock.Mock(side_effect=lambda *_: iter([
+            {"content": "", "thinking": "Hm"},
+            {"content": "", "thinking": "m."},
+            {"content": "Hel"},
+            {"content": "lo"},
+        ]))
         self.send("hi")
-        self.wait_until(lambda: self.app.label_widgets[-1].cget("text") == "Hmm.")
-
-        self.app.stop_event.set()
         self.wait_until(self.is_idle)
+
+        # the thinking is above the label, and the label only has the answer
+        self.assertEqual(self.thinking_text(), ["Hmm.\n"])
+        self.assertEqual(self.chat_text(), "\n\nllama3:latest\nHmm.\n\n\n")
         self.assertEqual(self.app.label_widgets[-1].cget("text"), "Hello")
+        self.assertEqual(
+            self.app.chat_history[-1],
+            {"role": "assistant", "content": "Hello", "thinking": "Hmm."})
+
+        self.send("again")
+        self.wait_until(self.is_idle)
+        self.assertEqual(
+            self.app.fetch_chat_stream_result.call_args[0][1],
+            [{"role": "user", "content": "hi"},
+             {"role": "assistant", "content": "Hello"},
+             {"role": "user", "content": "again"}])
+        self.assertEqual(self.thinking_text(), ["Hmm.\n", "Hmm.\n"])
+        self.assertEqual(self.app.chat_history[1]["thinking"], "Hmm.")
+
+    def test_answer_without_thinking(self):
+        self.app.fetch_chat_stream_result = mock.Mock(return_value=content("Hello"))
+        self.send("hi")
+        self.wait_until(self.is_idle)
+
+        self.assertEqual(self.thinking_text(), [])
         self.assertEqual(self.app.chat_history[-1], {"role": "assistant", "content": "Hello"})
 
     def test_stop_while_thinking(self):
@@ -525,12 +553,36 @@ class InterfaceTest(unittest.TestCase):
 
         self.app.fetch_chat_stream_result = stream
         self.send("hi")
-        self.wait_until(lambda: self.app.label_widgets[-1].cget("text") == "Hmm.")
+        self.wait_until(lambda: self.thinking_text() == ["Hmm.\n"])
 
         self.app.stop_button.invoke()
         self.wait_until(self.is_idle)
+        self.assertEqual(self.thinking_text(), ["Hmm.\n"])
         self.assertEqual(self.app.label_widgets[-1].cget("text"), "")
-        self.assertEqual(self.app.chat_history[-1], {"role": "assistant", "content": ""})
+        self.assertEqual(
+            self.app.chat_history[-1], {"role": "assistant", "content": "", "thinking": "Hmm."})
+
+    def test_save_and_load_chat_with_thinking(self):
+        history = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "Hello", "thinking": "Hmm."},
+            {"role": "user", "content": "again"},
+            {"role": "assistant", "content": "Hi again"},
+        ]
+        self.app.chat_history = list(history)
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "chat.json")
+            with mock.patch("tkinter.filedialog.asksaveasfilename", return_value=path), \
+                    mock.patch("tkinter.filedialog.askopenfilename", return_value=path):
+                self.app.save_chat()
+                self.app.load_chat()
+
+        self.assertEqual(self.app.chat_history, history)
+        self.assertEqual(self.thinking_text(), ["Hmm.\n"])
+        self.assertEqual(
+            [i.cget("text") for i in self.app.label_widgets], ["hi", "Hello", "again", "Hi again"])
+        self.assertEqual(
+            self.chat_text(), "\n\nllama3:latest\nHmm.\n\n\n\n\nllama3:latest\n\n\n")
 
     def test_stop(self):
         def stream(_model, _messages, stop_event):

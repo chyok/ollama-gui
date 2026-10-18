@@ -168,6 +168,16 @@ class OllamaInterface:
         self.chat_box.see(tk.END)
         self.chat_box.config(state=tk.DISABLED)
 
+    def append_thinking(self, text: str):
+        """Insert the thinking above the last label"""
+        label = self.label_widgets[-1]
+        self.chat_box.config(state=tk.NORMAL)
+        if "Thinking" in self.chat_box.tag_names(f"{label} -1c"):
+            self.chat_box.insert(f"{label} -1c", text, "Thinking")
+        else:
+            self.chat_box.insert(label, text + "\n", "Thinking")
+        self.chat_box.config(state=tk.DISABLED)
+
     def append_log_to_inner_textbox(self,
                                     message: Optional[str] = None,
                                     clear: bool = False):
@@ -281,9 +291,12 @@ class OllamaInterface:
             self.ai_label = self.layout.create_inner_label()
             self.stop_event = Event()
 
+            # the thinking is only for display, it is not sent back as context
+            messages = [{k: v for k, v in i.items() if k != "thinking"} for i in self.chat_history]
+
             Thread(
                 target=self.generate_ai_response,
-                args=(model, list(self.chat_history), self.stop_event),
+                args=(model, messages, self.stop_event),
                 daemon=True,
             ).start()
 
@@ -297,29 +310,32 @@ class OllamaInterface:
         error = None
         try:
             for message in self.fetch_chat_stream_result(model, messages, stop_event):
-                thinking += message.get("thinking") or ""
-                ai_message += message.get("content") or ""
-                # the thinking is shown until the answer starts
-                self.run_on_ui(self.set_ai_text, ai_message or thinking)
+                content, thought = message.get("content") or "", message.get("thinking") or ""
+                self.run_on_ui(self.append_ai_text, content, thought)
+                ai_message += content
+                thinking += thought
         except Exception as e:  # noqa
             error = _error_message(e)
         finally:
-            self.run_on_ui(self.finish_ai_response, ai_message, error)
+            self.run_on_ui(self.finish_ai_response, ai_message, thinking, error)
 
-    def set_ai_text(self, text: str):
+    def append_ai_text(self, content: str, thinking: str = ""):
         # the label is gone if the chat was cleared while generating
         if self.ai_label in self.label_widgets:
-            self.ai_label.config(text=text)
-            self.chat_box.see(tk.END)
+            if thinking:
+                self.append_thinking(thinking)
+            self.append_text_to_chat(content, use_label=True)
 
-    def finish_ai_response(self, ai_message: str, error: Optional[str] = None):
+    def finish_ai_response(self, ai_message: str, thinking: str = "", error: Optional[str] = None):
         try:
             if self.ai_label in self.label_widgets:
                 if error:
                     self.append_text_to_chat(f"\nAI error! {error}\n\n", ("Error",))
                 else:
-                    self.set_ai_text(ai_message)
-                    self.chat_history.append({"role": "assistant", "content": ai_message})
+                    message = {"role": "assistant", "content": ai_message}
+                    if thinking:
+                        message["thinking"] = thinking
+                    self.chat_history.append(message)
                     self.append_text_to_chat("\n\n")
         finally:
             self.ai_label = None
@@ -453,6 +469,8 @@ class OllamaInterface:
                         if message["role"] != "user":
                             self.append_text_to_chat(f"{self.model_select.get()}\n", ("Bold",))
                             self.layout.create_inner_label(on_right_side=False)
+                            if message.get("thinking"):
+                                self.append_thinking(message["thinking"])
                         else:
                             self.layout.create_inner_label(on_right_side=True)
 
@@ -801,6 +819,7 @@ def run():
     app.chat_box.tag_configure(
         "Bold", foreground="#ff007b", font=(app.default_font, 10, "bold")
     )
+    app.chat_box.tag_configure("Thinking", foreground="gray", font=(app.default_font, 10))
     app.chat_box.tag_configure("Error", foreground="red")
     app.chat_box.tag_configure("Right", justify="right")
 
