@@ -452,6 +452,9 @@ class InterfaceTest(unittest.TestCase):
         ranges = self.app.chat_box.tag_ranges("Thinking")
         return [self.app.chat_box.get(*ranges[i:i + 2]) for i in range(0, len(ranges), 2)]
 
+    def is_folded(self, label):
+        return self.app.chat_box.tag_cget(f"body{label}", "elide") in (1, "1", True)
+
     def test_model_select(self):
         self.assertEqual(self.app.model_select.get(), "llama3:latest")
         self.assertEqual(list(self.app.model_select["values"]), ["llama3:latest"])
@@ -520,10 +523,20 @@ class InterfaceTest(unittest.TestCase):
         self.send("hi")
         self.wait_until(self.is_idle)
 
-        # the thinking is above the label, and the label only has the answer
+        # the thinking is above the label and folded, the label only has the answer
+        label = self.app.label_widgets[-1]
         self.assertEqual(self.thinking_text(), ["Hmm.\n"])
-        self.assertEqual(self.chat_text(), "\n\nllama3:latest\nHmm.\n\n\n")
-        self.assertEqual(self.app.label_widgets[-1].cget("text"), "Hello")
+        self.assertEqual(self.chat_text(), "\n\nllama3:latest\n▸ Thinking\nHmm.\n\n\n")
+        self.assertEqual(label.cget("text"), "Hello")
+        self.assertTrue(self.is_folded(label))
+
+        # click the header to unfold and fold it again
+        self.app.fold_thinking(label)
+        self.assertFalse(self.is_folded(label))
+        self.assertIn("▾ Thinking", self.chat_text())
+        self.app.fold_thinking(label)
+        self.assertTrue(self.is_folded(label))
+        self.assertIn("▸ Thinking", self.chat_text())
         self.assertEqual(
             self.app.chat_history[-1],
             {"role": "assistant", "content": "Hello", "thinking": "Hmm."})
@@ -555,6 +568,9 @@ class InterfaceTest(unittest.TestCase):
         self.send("hi")
         self.wait_until(lambda: self.thinking_text() == ["Hmm.\n"])
 
+        self.assertFalse(self.is_folded(self.app.label_widgets[-1]))
+        self.assertIn("▾ Thinking", self.chat_text())
+
         self.app.stop_button.invoke()
         self.wait_until(self.is_idle)
         self.assertEqual(self.thinking_text(), ["Hmm.\n"])
@@ -582,7 +598,8 @@ class InterfaceTest(unittest.TestCase):
         self.assertEqual(
             [i.cget("text") for i in self.app.label_widgets], ["hi", "Hello", "again", "Hi again"])
         self.assertEqual(
-            self.chat_text(), "\n\nllama3:latest\nHmm.\n\n\n\n\nllama3:latest\n\n\n")
+            self.chat_text(), "\n\nllama3:latest\n▸ Thinking\nHmm.\n\n\n\n\nllama3:latest\n\n\n")
+        self.assertTrue(self.is_folded(self.app.label_widgets[1]))
 
     def test_stop(self):
         def stream(_model, _messages, stop_event):

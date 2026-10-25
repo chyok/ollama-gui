@@ -169,13 +169,28 @@ class OllamaInterface:
         self.chat_box.config(state=tk.DISABLED)
 
     def append_thinking(self, text: str):
-        """Insert the thinking above the last label"""
+        """Insert the thinking above the last label, under a header that folds it"""
         label = self.label_widgets[-1]
         self.chat_box.config(state=tk.NORMAL)
-        if "Thinking" in self.chat_box.tag_names(f"{label} -1c"):
-            self.chat_box.insert(f"{label} -1c", text, "Thinking")
+        if self.chat_box.tag_ranges(f"body{label}"):
+            self.chat_box.insert(f"{label} -1c", text, ("Thinking", f"body{label}"))
         else:
-            self.chat_box.insert(label, text + "\n", "Thinking")
+            self.chat_box.insert(label, "▾ Thinking\n", ("ThinkingHeader", f"header{label}"),
+                                 text + "\n", ("Thinking", f"body{label}"))
+            self.chat_box.tag_bind(f"header{label}", "<Button-1>", lambda e: self.fold_thinking(label))
+        self.chat_box.config(state=tk.DISABLED)
+
+    def fold_thinking(self, label: tk.Label, fold: Optional[bool] = None):
+        """Fold or unfold the thinking of the label, toggle if fold is None"""
+        if not self.chat_box.tag_ranges(f"header{label}"):
+            return
+        arrow = f"header{label}.first"
+        if fold is None:
+            fold = self.chat_box.get(arrow) == "▾"
+        self.chat_box.config(state=tk.NORMAL)
+        self.chat_box.tag_configure(f"body{label}", elide=fold)
+        self.chat_box.insert(arrow, "▸" if fold else "▾", ("ThinkingHeader", f"header{label}"))
+        self.chat_box.delete(f"{arrow} +1c")
         self.chat_box.config(state=tk.DISABLED)
 
     def append_log_to_inner_textbox(self,
@@ -324,6 +339,8 @@ class OllamaInterface:
         if self.ai_label in self.label_widgets:
             if thinking:
                 self.append_thinking(thinking)
+            if content and not self.ai_label.cget("text"):  # the answer starts
+                self.fold_thinking(self.ai_label, True)
             self.append_text_to_chat(content, use_label=True)
 
     def finish_ai_response(self, ai_message: str, thinking: str = "", error: Optional[str] = None):
@@ -471,6 +488,7 @@ class OllamaInterface:
                             self.layout.create_inner_label(on_right_side=False)
                             if message.get("thinking"):
                                 self.append_thinking(message["thinking"])
+                                self.fold_thinking(self.label_widgets[-1], True)
                         else:
                             self.layout.create_inner_label(on_right_side=True)
 
@@ -819,7 +837,11 @@ def run():
     app.chat_box.tag_configure(
         "Bold", foreground="#ff007b", font=(app.default_font, 10, "bold")
     )
-    app.chat_box.tag_configure("Thinking", foreground="gray", font=(app.default_font, 10))
+    app.chat_box.tag_configure("ThinkingHeader", foreground="#888888", font=(app.default_font, 10, "bold"))
+    app.chat_box.tag_configure("Thinking", foreground="#888888", font=(app.default_font, 10),
+                               lmargin1=14, lmargin2=14, spacing3=4)
+    app.chat_box.tag_bind("ThinkingHeader", "<Enter>", lambda e: app.chat_box.config(cursor="hand2"))
+    app.chat_box.tag_bind("ThinkingHeader", "<Leave>", lambda e: app.chat_box.config(cursor="xterm"))
     app.chat_box.tag_configure("Error", foreground="red")
     app.chat_box.tag_configure("Right", justify="right")
 
