@@ -1,0 +1,53 @@
+# Build the binaries with PyInstaller and attach them to the release
+name: Build Release Binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            suffix: windows.exe
+          - os: macos-latest
+            suffix: mac-arm.dmg
+          - os: ubuntu-latest
+            suffix: linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Build
+      shell: bash
+      run: |
+        pip install pyinstaller
+        FILE="ollama_gui-${{ github.event.release.tag_name || github.ref_name }}-${{ matrix.suffix }}"
+        if [ "$RUNNER_OS" = macOS ]; then
+          pyinstaller --windowed --name ollama_gui ollama_gui.py
+          hdiutil create -volname "Ollama GUI" -srcfolder dist/ollama_gui.app -format UDZO "$FILE"
+        else
+          pyinstaller --onefile --windowed --name ollama_gui ollama_gui.py
+          mv dist/ollama_gui* "$FILE"
+        fi
+        echo "FILE=$FILE" >> "$GITHUB_ENV"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.FILE }}
+        path: ${{ env.FILE }}
+    - name: Upload to the release
+      if: github.event_name == 'release'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh release upload "${{ github.event.release.tag_name }}" "$FILE" --clobber
