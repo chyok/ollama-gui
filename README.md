@@ -25,6 +25,11 @@ Provide you with the simplest possible visual Ollama interface.
 + 📝 Editable Conversation History.
 ### v1.2.2 
 + 💾 Save and Load Conversation History.
+### v1.3.0
++ 💭 Show the thinking of reasoning models, folded after the answer starts.
++ ⚠️ Show the error message returned by Ollama.
++ 🔄 Support the latest Ollama API.
++ 🧵 More stable UI, all widgets are updated in the main thread.
 
 ## 📎 Before Start
 
