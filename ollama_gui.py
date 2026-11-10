@@ -23,7 +23,7 @@ except (ModuleNotFoundError, ImportError):
         "Please refer to https://github.com/chyok/ollama-gui?tab=readme-ov-file#-qa")
     sys.exit(0)
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 UI_POLL_INTERVAL = 20  # ms
 
