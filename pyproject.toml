@@ -1,21 +1,33 @@
-[tool.poetry]
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
 name = "ollama-gui"
 version = "1.3.0"
 description = "A very simple ollama GUI, implemented using the built-in Python Tkinter library, with no additional dependencies."
-authors = ["chyok <chyok@hotmail.com>"]
-license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/chyok/ollama-gui"
-repository = "https://github.com/chyok/ollama-gui"
-packages = [{ include = "ollama_gui.py" }]
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "chyok", email = "chyok@hotmail.com" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 
-[tool.poetry.dependencies]
-python = "^3.6"
+[project.urls]
+Homepage = "https://github.com/chyok/ollama-gui"
+Repository = "https://github.com/chyok/ollama-gui"
 
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.scripts]
+[project.scripts]
 ollama-gui = "ollama_gui:run"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["ollama_gui.py"]
